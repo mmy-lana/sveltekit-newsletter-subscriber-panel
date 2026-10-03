@@ -7,6 +7,7 @@
 	import SubscriberModal from '#lib/components/panel/SubscriberModal.svelte';
 	import SubscriberTable from '#lib/components/panel/SubscriberTable.svelte';
 	import Button from '#lib/components/ui/Button.svelte';
+	import ConfirmDialog from '#lib/components/ui/ConfirmDialog.svelte';
 	import Pagination from '#lib/components/ui/Pagination.svelte';
 	import { getSubscriberState } from '#lib/state/subscriber.svelte';
 	import { getToastState } from '#lib/state/toast.svelte';
@@ -152,11 +153,35 @@
 		selectedIds = [];
 	}
 
-	function handleBulkDelete(): void {
-		const count = selectedIds.length;
-		subscriberStore.bulkDelete(selectedIds);
-		selectedIds = [];
-		toastStore.success('Subscribers deleted', `${count} record(s) removed from the audience.`);
+	/**
+	 * [HIGH-02] Bulk deletion is irreversible and used to fire from a single click in
+	 * a toolbar the operator reaches for while doing something else. The ids are
+	 * frozen at the moment the confirmation opens, so the count in the dialog is
+	 * exactly what the confirm button will delete.
+	 */
+	let bulkDeleteIds = $state<string[]>([]);
+	let isBulkDeleteConfirmOpen = $state(false);
+
+	function requestBulkDelete(): void {
+		if (selectedIds.length === 0) return;
+		bulkDeleteIds = [...selectedIds];
+		isBulkDeleteConfirmOpen = true;
+	}
+
+	function confirmBulkDelete(): void {
+		const ids = bulkDeleteIds;
+		bulkDeleteIds = [];
+		isBulkDeleteConfirmOpen = false;
+		if (ids.length === 0) return;
+
+		subscriberStore.bulkDelete(ids);
+		selectedIds = selectedIds.filter((id) => !ids.includes(id));
+		toastStore.success('Subscribers deleted', `${ids.length} record(s) removed from the audience.`);
+	}
+
+	function cancelBulkDelete(): void {
+		bulkDeleteIds = [];
+		isBulkDeleteConfirmOpen = false;
 	}
 
 	// A rejected write (quota exhausted, private mode) is surfaced once, then cleared.
@@ -217,7 +242,7 @@
 					selectedCount={selectedIds.length}
 					onfilterchange={(key, value) => subscriberStore.setFilter(key, value)}
 					onbulkstatus={handleBulkStatus}
-					onbulkdelete={handleBulkDelete}
+					onrequestbulkdelete={requestBulkDelete}
 					onclearselection={() => (selectedIds = [])}
 				/>
 
@@ -297,37 +322,38 @@
 	onclose={() => (isImportModalOpen = false)}
 />
 
-{#if deleteTarget}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4"
-		role="dialog"
-		aria-modal="true"
-		aria-labelledby="delete-subscriber-title"
-	>
-		<div class="fixed inset-0 bg-stone-900/40 backdrop-blur-sm animate-fade-in" aria-hidden="true"></div>
+<!-- [HIGH-04] One primitive for every destructive confirmation: scroll lock, focus
+trap, backdrop and Escape dismissal come from Modal. -->
+<ConfirmDialog
+	isOpen={deleteTarget !== null}
+	title="Delete subscriber?"
+	description="This removes the reader and their engagement history."
+	confirmLabel="Delete subscriber"
+	onconfirm={handleDelete}
+	oncancel={() => (deleteTarget = null)}
+>
+	{#if deleteTarget}
+		<p>
+			<strong class="break-all">{deleteTarget.email}</strong> will be removed from the audience along
+			with its engagement history.
+		</p>
+		<p class="text-xs text-stone-500">This action cannot be undone.</p>
+	{/if}
+</ConfirmDialog>
 
-		<div
-			class="relative z-10 w-full max-w-md bg-white rounded-lg shadow-modal border border-stone-200 overflow-hidden animate-sheet-rise"
-			role="document"
-		>
-			<div class="px-6 py-4 border-b border-stone-200">
-				<h2 id="delete-subscriber-title" class="text-lg font-serif font-bold text-stone-900">
-					Delete subscriber?
-				</h2>
-			</div>
-
-			<div class="px-6 py-4 text-sm text-stone-700 space-y-2">
-				<p>
-					<strong class="break-all">{deleteTarget.email}</strong> will be removed from the audience
-					along with its engagement history.
-				</p>
-				<p class="text-xs text-stone-500">This action cannot be undone.</p>
-			</div>
-
-			<div class="px-6 py-3 bg-stone-50 border-t border-stone-200 flex items-center justify-end gap-3 pb-safe-bottom">
-				<Button variant="outline" size="sm" onclick={() => (deleteTarget = null)}>Cancel</Button>
-				<Button variant="danger" size="sm" onclick={handleDelete}>Delete subscriber</Button>
-			</div>
-		</div>
-	</div>
-{/if}
+<!-- [HIGH-02] Bulk deletion states the exact number of records before it happens. -->
+<ConfirmDialog
+	bind:isOpen={isBulkDeleteConfirmOpen}
+	title="Delete selected subscribers?"
+	description="Bulk deletion is immediate and cannot be undone."
+	confirmLabel="Delete {bulkDeleteIds.length} subscriber{bulkDeleteIds.length === 1 ? '' : 's'}"
+	onconfirm={confirmBulkDelete}
+	oncancel={cancelBulkDelete}
+>
+	<p>
+		<strong class="tabular-nums">{bulkDeleteIds.length}</strong>
+		{bulkDeleteIds.length === 1 ? 'subscriber' : 'subscribers'} will be permanently removed from the
+		audience, together with their tags and engagement history.
+	</p>
+	<p class="text-xs text-stone-500">This action cannot be undone.</p>
+</ConfirmDialog>

@@ -12,6 +12,7 @@ import { createRawSnippet } from 'svelte';
 
 import Badge from '#lib/components/ui/Badge.svelte';
 import Button from '#lib/components/ui/Button.svelte';
+import ConfirmDialog from '#lib/components/ui/ConfirmDialog.svelte';
 import Dropdown from '#lib/components/ui/Dropdown.svelte';
 import Input from '#lib/components/ui/Input.svelte';
 import Modal from '#lib/components/ui/Modal.svelte';
@@ -123,6 +124,39 @@ const modalOpen = render(Modal, {
 
 const modalClosed = render(Modal, {
 	props: { isOpen: false, title: 'Hidden dialog', onclose: () => {} }
+}).body;
+
+/* ------------------------------------------------------------------ */
+/* ConfirmDialog                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * [HIGH-03 / HIGH-04] The confirmation step is the single primitive behind every
+ * destructive action, so it is asserted as such: full dialog semantics inherited
+ * from Modal, an explicit affected-record body, and a danger-styled confirm.
+ */
+const confirmDialogOpen = render(ConfirmDialog, {
+	props: {
+		isOpen: true,
+		title: 'Delete selected subscribers?',
+		description: 'Bulk deletion is immediate and cannot be undone.',
+		confirmLabel: 'Delete 3 subscribers',
+		children: staticSnippet(
+			'<p class="text-sm">3 subscribers will be permanently removed from the audience.</p>'
+		),
+		onconfirm: () => {},
+		oncancel: () => {}
+	}
+}).body;
+
+const confirmDialogClosed = render(ConfirmDialog, {
+	props: {
+		isOpen: false,
+		title: 'Delete issue?',
+		confirmLabel: 'Delete issue',
+		onconfirm: () => {},
+		oncancel: () => {}
+	}
 }).body;
 
 /* ------------------------------------------------------------------ */
@@ -256,7 +290,7 @@ const filterBar = render(SubscriberFilterBar, {
 		selectedCount: 2,
 		onfilterchange: noop,
 		onbulkstatus: noop,
-		onbulkdelete: noop,
+		onrequestbulkdelete: noop,
 		onclearselection: noop
 	}
 }).body;
@@ -497,6 +531,40 @@ const cases: Case[] = [
 		}
 	},
 	{
+		name: 'ConfirmDialog inherits full dialog semantics from Modal',
+		html: confirmDialogOpen,
+		assert: (html) => {
+			// [HIGH-04] Scroll lock, focus trap, Escape and backdrop dismissal all come
+			// from Modal, so the primitive's markup must be the dialog's markup.
+			mustInclude(html, 'role="dialog"', 'dialog role');
+			mustInclude(html, 'aria-modal="true"', 'modal flag');
+			mustInclude(html, 'aria-labelledby="modal-title"', 'labelled by title');
+			mustInclude(html, 'Delete selected subscribers?', 'title text');
+			mustInclude(html, 'Bulk deletion is immediate and cannot be undone.', 'description text');
+			mustInclude(html, '3 subscribers will be permanently removed', 'affected records stated');
+			mustInclude(html, 'aria-label="Close dialog"', 'close control label');
+			mustInclude(html, '100dvh', 'dynamic viewport height');
+			mustInclude(html, 'pb-safe-bottom', 'safe-area aware footer padding');
+		}
+	},
+	{
+		name: 'ConfirmDialog offers a cancel and a danger-styled confirm',
+		html: confirmDialogOpen,
+		assert: (html) => {
+			mustInclude(html, 'Cancel', 'cancel action');
+			mustInclude(html, 'Delete 3 subscribers', 'confirm label states the count');
+			mustInclude(html, 'bg-red-700', 'danger confirm variant');
+			mustInclude(html, 'min-h-[44px]', 'touch-sized controls');
+		}
+	},
+	{
+		name: 'ConfirmDialog renders nothing until it is requested',
+		html: confirmDialogClosed,
+		assert: (html) => {
+			mustNotInclude(html, 'role="dialog"', 'a confirmation must not exist before it is asked for');
+		}
+	},
+	{
 		name: 'Input wires label, hint and error to the control',
 		html: inputDefault,
 		assert: (html) => {
@@ -643,6 +711,9 @@ const cases: Case[] = [
 			mustInclude(html, 'Bulk actions', 'bulk action region');
 			mustInclude(html, '2 selected', 'selection summary');
 			mustInclude(html, 'Mark active', 'bulk status action');
+			// [HIGH-02] The destructive control states what it acts on; it does not
+			// delete anything on its own.
+			mustInclude(html, 'Delete selected', 'bulk delete requests a confirmation');
 		}
 	},
 	{
@@ -858,6 +929,10 @@ export function runComponentSuite(): SuiteResult {
 			{ title: 'Feedback', html: skeletonText + skeletonCircle + toastStack },
 			{ title: 'Pagination', html: paginationMiddle },
 			{ title: 'Modal', html: modalOpen },
+			// [HIGH-02 / HIGH-03 / HIGH-04] Every destructive confirmation renders
+			// here, so the Chrome pass measures its touch targets and its fit inside
+			// the narrowest supported viewport.
+			{ title: 'Confirmation dialog', html: confirmDialogOpen },
 			{ title: 'Metrics', html: metricCard },
 			{ title: 'Subscriber table', html: subscriberTableDesktop },
 			{

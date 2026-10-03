@@ -7,6 +7,7 @@
 	import IssueDeliveryQueueModal from '#lib/components/panel/IssueDeliveryQueueModal.svelte';
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import Button from '#lib/components/ui/Button.svelte';
+	import ConfirmDialog from '#lib/components/ui/ConfirmDialog.svelte';
 	import Pagination from '#lib/components/ui/Pagination.svelte';
 	import Select from '#lib/components/ui/Select.svelte';
 	import { getIssueState } from '#lib/state/issue.svelte';
@@ -349,32 +350,21 @@
 	/>
 {/if}
 
-{#if deleteTarget}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center p-4"
-		role="dialog"
-		aria-modal="true"
-		aria-labelledby="delete-issue-title"
-	>
-		<div class="fixed inset-0 bg-stone-900/40 backdrop-blur-sm animate-fade-in" aria-hidden="true"></div>
-
-		<div
-			class="relative z-10 w-full max-w-md bg-white rounded-lg shadow-modal border border-stone-200 overflow-hidden animate-sheet-rise"
-			role="document"
-		>
-			<div class="px-6 py-4 border-b border-stone-200">
-				<h2 id="delete-issue-title" class="text-lg font-serif font-bold text-stone-900">Delete issue?</h2>
-			</div>
-
-			<div class="px-6 py-4 text-sm text-stone-700 space-y-2">
-				<p><strong>{deleteTarget.title}</strong> and its delivery statistics will be removed.</p>
-				<p class="text-xs text-stone-500">This action cannot be undone.</p>
-			</div>
-
-			<div class="px-6 py-3 bg-stone-50 border-t border-stone-200 flex items-center justify-end gap-3 pb-safe-bottom">
-				<Button variant="outline" size="sm" onclick={() => (deleteTarget = null)}>Cancel</Button>
-				<Button variant="danger" size="sm" onclick={handleDelete}>Delete issue</Button>
-			</div>
-		</div>
-	</div>
-{/if}
+<!-- [HIGH-04] Deletion confirmation uses the shared Modal primitive, which owns the
+body scroll lock, the Tab focus trap, backdrop dismissal and Escape handling. -->
+<ConfirmDialog
+	isOpen={deleteTarget !== null}
+	title="Delete issue?"
+	description="This removes the issue and everything recorded about it."
+	confirmLabel="Delete issue"
+	onconfirm={handleDelete}
+	oncancel={() => (deleteTarget = null)}
+>
+	{#if deleteTarget}
+		<p>
+			<strong class="break-words">{deleteTarget.title}</strong> and its delivery statistics will be
+			removed.
+		</p>
+		<p class="text-xs text-stone-500">This action cannot be undone.</p>
+	{/if}
+</ConfirmDialog>

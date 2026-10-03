@@ -331,6 +331,148 @@ export default [
 	},
 
 	{
+		name: 'phase5/destructive-actions-require-confirmation',
+		async run({ page, origin, reporter }) {
+			await page.setViewport({ width: 1440, height: 900 });
+			await goto(page, '/admin/subscribers', origin);
+			await waitForHydration(page);
+
+			const before = await countOf(page, 'table tbody tr');
+
+			// [HIGH-02] Bulk deletion asks first and states the exact record count.
+			await page.click('input[aria-label="Select all subscribers on this page"]');
+			await waitForStep(page, () => document.body.innerText.includes('10 selected'), 'selection summary');
+
+			await clickButton(page, 'Delete selected');
+			await waitForStep(page, () => Boolean(document.querySelector('[role="dialog"]')), 'bulk confirm open');
+
+			reporter.expect(await pageContains(page, 'Delete selected subscribers?'), 'bulk delete asks first');
+			reporter.expect(await pageContains(page, '10 subscribers will be permanently removed'), 'exact count stated');
+			reporter.expect(
+				(await page.evaluate(() => document.body.style.overflow)) === 'hidden',
+				'body scroll is locked behind the confirmation'
+			);
+
+			// Escape dismisses without deleting anything.
+			await page.keyboard.press('Escape');
+			await waitForStep(page, () => !document.querySelector('[role="dialog"]'), 'escape dismissed the dialog');
+			reporter.expectEqual(
+				await countOf(page, 'table tbody tr'),
+				before,
+				'cancelling the confirmation deletes nothing'
+			);
+			reporter.expect(
+				(await page.evaluate(() => document.body.style.overflow)) !== 'hidden',
+				'scroll lock released on dismissal'
+			);
+
+			// Confirming performs the deletion.
+			await clickButton(page, 'Delete selected');
+			await waitForStep(page, () => Boolean(document.querySelector('[role="dialog"]')), 'bulk confirm open');
+			await clickButton(page, 'Delete 10 subscribers');
+			await waitForStep(page, () => !document.querySelector('[role="dialog"]'), 'bulk delete completed');
+			await waitForStep(page, () => document.body.innerText.includes('Subscribers deleted'), 'deletion toast');
+			reporter.expect(true, 'confirming the bulk deletion removes the selected records');
+
+			const remaining = await page.evaluate(() => {
+				const stored = JSON.parse(localStorage.getItem('snsp_subscribers_v1') ?? '[]');
+				return stored.length;
+			});
+			reporter.expect(remaining > 0, 'only the selected records were removed');
+
+			// [HIGH-04] The single-record confirmation uses the same primitive.
+			await goto(page, '/admin/subscribers', origin);
+			await waitForHydration(page);
+			await page.click('table tbody tr:first-child button[aria-label^="Delete"]');
+			await waitForStep(page, () => Boolean(document.querySelector('[role="dialog"]')), 'row confirm open');
+			reporter.expect(await pageContains(page, 'Delete subscriber?'), 'row delete asks first');
+			reporter.expect(
+				(await page.evaluate(() => document.body.style.overflow)) === 'hidden',
+				'row confirmation locks the page behind it'
+			);
+
+			// Tab focus stays inside the dialog while it is open.
+			for (let index = 0; index < 8; index += 1) {
+				await page.keyboard.press('Tab');
+			}
+			reporter.expect(
+				await page.evaluate(() => {
+					const dialog = document.querySelector('[role="dialog"]');
+					return dialog !== null && dialog.contains(document.activeElement);
+				}),
+				'focus is trapped inside the confirmation dialog'
+			);
+
+			await clickButton(page, 'Cancel');
+			await waitForStep(page, () => !document.querySelector('[role="dialog"]'), 'row confirm cancelled');
+
+			await page.evaluate(() => localStorage.removeItem('snsp_subscribers_v1'));
+		}
+	},
+
+	{
+		name: 'phase5/issue-deletion-confirms-and-redirects',
+		async run({ page, origin, reporter }) {
+			await page.setViewport({ width: 1440, height: 900 });
+
+			// [HIGH-04] The list confirmation comes from the shared Modal primitive.
+			await goto(page, '/admin/issues', origin);
+			await waitForHydration(page);
+			const rowsBefore = await countOf(page, 'ul > li');
+
+			await clickByText(page, 'li button', 'Delete');
+			await waitForStep(page, () => Boolean(document.querySelector('[role="dialog"]')), 'issue confirm open');
+			reporter.expect(await pageContains(page, 'Delete issue?'), 'the list asks before deleting');
+			reporter.expect(await pageContains(page, 'This action cannot be undone'), 'the consequence is stated');
+
+			await page.keyboard.press('Escape');
+			await waitForStep(page, () => !document.querySelector('[role="dialog"]'), 'escape dismissed');
+			reporter.expectEqual(
+				await countOf(page, 'ul > li'),
+				rowsBefore,
+				'dismissing the confirmation deletes nothing'
+			);
+
+			await clickByText(page, 'li button', 'Delete');
+			await waitForStep(page, () => Boolean(document.querySelector('[role="dialog"]')), 'issue confirm open');
+			await clickButton(page, 'Delete issue');
+			await waitForStep(page, () => !document.querySelector('[role="dialog"]'), 'issue deleted');
+			reporter.expectEqual(
+				await countOf(page, 'ul > li'),
+				rowsBefore - 1,
+				'confirming removes the issue from the collection'
+			);
+
+			// [HIGH-03 / MED-01] The editor asks first, then leaves the dead route.
+			await goto(page, '/admin/issues/issue-002', origin);
+			await waitForHydration(page);
+
+			await clickButton(page, 'Delete issue');
+			await waitForStep(page, () => Boolean(document.querySelector('[role="dialog"]')), 'editor confirm open');
+			reporter.expect(await pageContains(page, 'Delete issue?'), 'the editor asks before deleting');
+			reporter.expectEqual(
+				await page.evaluate(() => window.location.pathname),
+				'/admin/issues/issue-002',
+				'one click never deletes: the editor route is still live'
+			);
+
+			await clickButton(page, 'Delete issue');
+			await waitForStep(
+				page,
+				() => window.location.pathname === '/admin/issues',
+				'delete redirects to the collection'
+			);
+			reporter.expect(true, '[MED-01] deleting from the editor never strands the operator on a dead route');
+			reporter.expect(
+				await pageContains(page, 'Newsletter Issues'),
+				'the collection renders after the redirect'
+			);
+
+			await page.evaluate(() => localStorage.removeItem('snsp_issues_v1'));
+		}
+	},
+
+	{
 		name: 'phase5/issue-dispatch-lifecycle',
 		async run({ page, origin, reporter }) {
 			await page.setViewport({ width: 1440, height: 900 });

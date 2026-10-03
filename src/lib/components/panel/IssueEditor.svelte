@@ -3,6 +3,7 @@
 	import type { AudienceFilter, NewsletterIssue } from '#lib/types/newsletter';
 	import type { SelectOption } from '#lib/types/ui';
 	import Button from '#lib/components/ui/Button.svelte';
+	import ConfirmDialog from '#lib/components/ui/ConfirmDialog.svelte';
 	import Input from '#lib/components/ui/Input.svelte';
 	import Select from '#lib/components/ui/Select.svelte';
 	import Textarea from '#lib/components/ui/Textarea.svelte';
@@ -123,6 +124,22 @@
 	function handleTags(): void {
 		update({ tags: form.tagsInput.split(',').map((tag) => tag.trim()).filter(Boolean) });
 	}
+
+	/**
+	 * [HIGH-03] A single click on "Delete issue" used to destroy the record, along
+	 * with its delivery statistics, with no way back. The destructive action now
+	 * opens an accessible confirmation first; `ondelete` only runs once confirmed.
+	 */
+	let isDeleteConfirmOpen = $state(false);
+
+	function requestDelete(): void {
+		isDeleteConfirmOpen = true;
+	}
+
+	function confirmDelete(): void {
+		isDeleteConfirmOpen = false;
+		ondelete();
+	}
 </script>
 
 <div class="space-y-5">
@@ -139,7 +156,7 @@
 		</div>
 
 		<div class="flex items-center gap-2">
-			<Button variant="ghost" size="sm" class="text-rose-700" onclick={ondelete}>Delete issue</Button>
+			<Button variant="ghost" size="sm" class="text-rose-700" onclick={requestDelete}>Delete issue</Button>
 			<Button
 				variant="primary"
 				size="sm"
@@ -258,3 +275,19 @@
 		lists, emphasis, inline code and links. HTML is escaped before rendering.
 	</p>
 </div>
+
+<!-- [HIGH-03] Destructive confirmation lives with the action it guards. -->
+<ConfirmDialog
+	bind:isOpen={isDeleteConfirmOpen}
+	title="Delete issue?"
+	description="This removes the issue and everything recorded about it."
+	confirmLabel="Delete issue"
+	onconfirm={confirmDelete}
+	oncancel={() => (isDeleteConfirmOpen = false)}
+>
+	<p>
+		<strong class="break-words">{issue.title}</strong> will be removed along with its delivery
+		statistics and any unsaved draft on this page.
+	</p>
+	<p class="text-xs text-stone-500">This action cannot be undone.</p>
+</ConfirmDialog>

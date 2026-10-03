@@ -17,7 +17,11 @@
 			value: SubscriberFilterOptions[K]
 		) => void;
 		onbulkstatus: (status: SubscriberStatus) => void;
-		onbulkdelete: () => void;
+		/**
+		 * [HIGH-02] Requests a bulk delete. The parent opens the confirmation step —
+		 * this control never deletes anything on its own.
+		 */
+		onrequestbulkdelete: () => void;
 		onclearselection: () => void;
 	}
 
@@ -28,7 +32,7 @@
 		selectedCount,
 		onfilterchange,
 		onbulkstatus,
-		onbulkdelete,
+		onrequestbulkdelete,
 		onclearselection
 	}: Props = $props();
 
@@ -205,7 +209,7 @@
 				<Button variant="outline" size="sm" onclick={() => onbulkstatus('unsubscribed')}>
 					Unsubscribe
 				</Button>
-				<Button variant="danger" size="sm" onclick={onbulkdelete}>Delete</Button>
+				<Button variant="danger" size="sm" onclick={onrequestbulkdelete}>Delete selected</Button>
 				<Button variant="ghost" size="sm" onclick={onclearselection}>Clear</Button>
 			</div>
 		</div>
