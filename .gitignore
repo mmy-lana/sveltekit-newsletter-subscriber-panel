@@ -9,3 +9,4 @@ dist
 .DS_Store
 repomix-output.xml
 verify-artifacts
+.vercel
