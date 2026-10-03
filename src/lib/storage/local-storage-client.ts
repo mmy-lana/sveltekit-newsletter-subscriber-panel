@@ -122,6 +122,22 @@ export function saveSettings(settings: PublicationSettings): void {
 	safeWrite(STORAGE_KEYS.SETTINGS, settings);
 }
 
+/**
+ * Canonical seed payloads, for renderers that must produce identical markup on
+ * the server and during the first client render (before persistence hydration).
+ */
+export function getSeedSubscribers(): Subscriber[] {
+	return seedSubscribers();
+}
+
+export function getSeedIssues(): NewsletterIssue[] {
+	return seedIssues();
+}
+
+export function getSeedSettings(): PublicationSettings {
+	return { ...initialSettings };
+}
+
 /** Restores every collection to the bundled seed fixtures. */
 export function resetStorage(): void {
 	if (!isBrowser()) return;

@@ -9,7 +9,7 @@ import path from 'node:path';
 
 const suitePath = path.resolve(process.cwd(), 'verify-artifacts/logic-suite.js');
 const { runSuite } = await import(pathToFileURL(suitePath).href);
-const summary = runSuite();
+const summary = await runSuite();
 
 console.log(`\n[logic] ${summary.passed}/${summary.total} assertions groups passed`);
 

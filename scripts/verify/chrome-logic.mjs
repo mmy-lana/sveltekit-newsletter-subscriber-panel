@@ -30,7 +30,7 @@ const runnerHtml = `<!doctype html>
 			import { runSuite } from '/logic-suite.js';
 
 			const startedAt = performance.now();
-			const summary = runSuite();
+			const summary = await runSuite();
 			summary.durationMs = Math.round(performance.now() - startedAt);
 			window.__LOGIC_RESULT__ = summary;
 			document.getElementById('output').textContent = JSON.stringify(summary, null, 2);

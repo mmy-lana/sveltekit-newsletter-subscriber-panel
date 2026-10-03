@@ -39,6 +39,12 @@ import {
 } from '#lib/utils/validators';
 import { generateUuid } from '#lib/utils/uuid';
 
+// Phase 4 — Svelte 5 rune stores (state, derived values and the dispatch engine).
+import { SubscriberStore } from '#lib/state/subscriber.svelte';
+import { IssueStore } from '#lib/state/issue.svelte';
+import { DeliveryQueueManager } from '#lib/state/queue.svelte';
+import { ToastStore } from '#lib/state/toast.svelte';
+
 export interface SuiteResult {
 	passed: number;
 	failed: number;
@@ -52,9 +58,9 @@ interface CaseResult {
 	detail?: string;
 }
 
-const cases: Array<{ name: string; run: () => void }> = [];
+const cases: Array<{ name: string; run: () => void | Promise<void> }> = [];
 
-function test(name: string, run: () => void): void {
+function test(name: string, run: () => void | Promise<void>): void {
 	cases.push({ name, run });
 }
 
@@ -503,15 +509,351 @@ test('seed issue markdown renders to non-empty sanitised HTML', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Phase 4 — rune stores                                                */
+/* ------------------------------------------------------------------ */
+
+test('SubscriberStore derives filtering, sorting and pagination', () => {
+	const store = new SubscriberStore();
+	store.filters.pageSize = 5;
+
+	assertEqual(store.totalCount, 14, 'seed population');
+	assertEqual(store.activeCount, 10, 'active count derived from state');
+	assertEqual(store.paidCount, 6, 'paid + founding count derived from state');
+	assertEqual(store.bouncedCount, 2, 'bounced count derived from state');
+
+	store.setFilter('searchQuery', 'svelte');
+	assertEqual(store.filteredItems.length, 2, 'search matches name, email and tags');
+	assertEqual(store.paginatedItems.length, 2, 'page slice respects the result set');
+
+	store.setFilter('status', 'active');
+	assert(
+		store.filteredItems.every((subscriber) => subscriber.status === 'active'),
+		'status filter applied'
+	);
+
+	store.setFilter('searchQuery', '');
+	store.setFilter('tier', 'founding');
+	assertEqual(store.filteredItems.length, 3, 'tier filter applied');
+
+	store.setFilter('tier', 'all');
+	store.setSort('email');
+	assertEqual(store.filters.sortDirection, 'asc', 'email sorts ascending first');
+	const emails = store.filteredItems.map((subscriber) => subscriber.email);
+	assertEqual(
+		emails.join(','),
+		[...emails].sort((a, b) => a.localeCompare(b)).join(','),
+		'email ordering is deterministic'
+	);
+
+	store.setSort('openRatePercent');
+	assertEqual(store.filters.sortDirection, 'desc', 'numeric columns default to descending');
+	assert(
+		store.filteredItems.every(
+			(subscriber, index, list) => index === 0 || list[index - 1].metrics.openRatePercent >= subscriber.metrics.openRatePercent
+		),
+		'open rate ordered descending'
+	);
+
+	store.setSort('email');
+	assertEqual(store.filters.sortDirection, 'asc', 're-sorting toggles direction');
+});
+
+test('SubscriberStore resets pagination whenever a filter changes', () => {
+	const store = new SubscriberStore();
+	store.filters.pageSize = 5;
+	store.setPage(2);
+	assertEqual(store.filters.page, 2, 'page advanced');
+
+	store.setFilter('searchQuery', 'a');
+	assertEqual(store.filters.page, 1, 'filter change resets the page offset');
+
+	store.setFilter('page', 2);
+	assertEqual(store.filters.page, 2, 'explicit page assignment survives');
+});
+
+test('SubscriberStore mutates the audience with persistence-safe semantics', () => {
+	const store = new SubscriberStore();
+
+	const created = store.addSubscriber({
+		email: '  NEW.READER@Example.COM ',
+		firstName: 'New',
+		lastName: 'Reader',
+		status: 'active',
+		tier: 'paid',
+		tags: ['test'],
+		notes: ''
+	});
+	assertEqual(created.email, 'new.reader@example.com', 'created email normalised');
+	assertEqual(created.metrics.emailsReceivedCount, 0, 'telemetry zeroed');
+	assertEqual(store.totalCount, 15, 'record added');
+	assert(store.getByEmail('NEW.READER@example.com') !== undefined, 'lookup by email works');
+
+	const before = store.getById(created.id);
+	if (!before) throw new Error('created record missing');
+	store.updateSubscriber(created.id, { tier: 'founding', firstName: 'Renamed' });
+	const after = store.getById(created.id);
+	if (!after) throw new Error('updated record missing');
+	assertEqual(after.tier, 'founding', 'patch applied');
+	assertEqual(after.firstName, 'Renamed', 'patch applied');
+	assert(after.updatedAt >= before.updatedAt, 'updatedAt advanced');
+
+	store.recordDelivery(created.id, { opened: true, clicked: true });
+	const engaged = store.getById(created.id);
+	if (!engaged) throw new Error('engaged record missing');
+	assertEqual(engaged.metrics.emailsReceivedCount, 1, 'delivery recorded');
+	assertEqual(engaged.metrics.emailsOpenedCount, 1, 'open recorded');
+	assertEqual(engaged.metrics.openRatePercent, 100, 'engagement recalculated');
+
+	store.deleteSubscriber(created.id);
+	assertEqual(store.totalCount, 14, 'record deleted');
+	assertEqual(store.getById(created.id), undefined, 'deleted record is gone');
+});
+
+test('SubscriberStore refuses to reactivate hard bounces in bulk', () => {
+	const store = new SubscriberStore();
+	const bounced = store.items.filter((subscriber) => subscriber.status === 'bounced');
+	assert(bounced.length > 0, 'seed contains bounced addresses');
+
+	const changed = store.bulkUpdateStatus(
+		bounced.map((subscriber) => subscriber.id),
+		'active'
+	);
+	assertEqual(changed, 0, 'no bounced address was reactivated');
+	assert(
+		store.items
+			.filter((subscriber) => bounced.some((original) => original.id === subscriber.id))
+			.every((subscriber) => subscriber.status === 'bounced'),
+		'bounced addresses stay bounced'
+	);
+
+	const active = store.items.filter((subscriber) => subscriber.status === 'active').slice(0, 2);
+	const unsubscribed = store.bulkUpdateStatus(
+		active.map((subscriber) => subscriber.id),
+		'unsubscribed'
+	);
+	assertEqual(unsubscribed, 2, 'bulk status change applied to eligible records');
+	assert(
+		active.every((subscriber) => store.getById(subscriber.id)?.status === 'unsubscribed'),
+		'target statuses updated'
+	);
+});
+
+test('IssueStore creates drafts with unique slugs and rendered HTML', () => {
+	const store = new IssueStore();
+	assertEqual(store.totalCount, 6, 'seed issues');
+	assertEqual(store.sentCount, 3, 'sent issues derived');
+	assertEqual(store.draftCount, 1, 'draft issues derived');
+	assertEqual(store.publishedIssues.length, 3, 'public archive list derived');
+
+	assertEqual(store.buildUniqueSlug('The Art of Minimal State'), 'the-art-of-minimal-state-2', 'slug collision suffix');
+
+	const draft = store.createDraft();
+	assertEqual(store.totalCount, 7, 'draft inserted');
+	assertEqual(draft.status, 'draft', 'draft status');
+	assertEqual(draft.slug.startsWith('dispatch-'), true, 'generated slug prefix');
+	assert(draft.contentHtml.includes('<h1'), 'draft HTML rendered from markdown');
+	assertEqual(store.currentEditorIssue?.id, draft.id, 'editor target set');
+});
+
+test('IssueStore re-derives HTML, excerpt and slug on update', () => {
+	const store = new IssueStore();
+	const draft = store.createDraft();
+
+	store.updateIssue(draft.id, {
+		title: 'Signals All the Way Down',
+		contentMarkdown: '# Signals\n\nReactive primitives keep derived truth honest.',
+		excerpt: ''
+	});
+
+	const updated = store.getById(draft.id);
+	if (!updated) throw new Error('updated issue missing');
+	assertEqual(updated.slug, 'signals-all-the-way-down', 'slug derived from title for drafts');
+	assert(updated.contentHtml.includes('<h1'), 'HTML re-rendered from markdown');
+	assert(updated.contentHtml.includes('Reactive primitives'), 'new body rendered');
+	assert(updated.excerpt.length > 0, 'excerpt auto-derived when cleared');
+	assertEqual(store.currentEditorIssue?.title, updated.title, 'editor target refreshed');
+
+	store.deleteIssue(draft.id);
+	assertEqual(store.getById(draft.id), undefined, 'issue deleted');
+	assertEqual(store.currentEditorIssue, null, 'editor target cleared on delete');
+});
+
+test('IssueStore reconciles delivery jobs onto the issue', () => {
+	const store = new IssueStore();
+	const draft = store.createDraft();
+
+	const jobs = [
+		{ status: 'delivered', openedAt: '2026-10-05T12:00:01Z', clickedAt: '2026-10-05T12:00:02Z' },
+		{ status: 'delivered', openedAt: '2026-10-05T12:00:03Z', clickedAt: null },
+		{ status: 'bounced', openedAt: null, clickedAt: null }
+	] as Parameters<typeof summarizeDeliveryJobs>[0];
+
+	store.markAsSentFromJobs(draft.id, jobs, 3);
+
+	const sent = store.getById(draft.id);
+	if (!sent) throw new Error('dispatched issue missing');
+	assertEqual(sent.status, 'sent', 'status marked sent');
+	assert(sent.publishedAt !== null, 'publication timestamp stamped');
+	assertEqual(sent.stats.deliveredCount, 2, 'delivered reconciled');
+	assertEqual(sent.stats.bouncedCount, 1, 'bounced reconciled');
+	assertEqual(sent.stats.openedCount, 2, 'opened reconciled');
+	assertEqual(sent.stats.clickedCount, 1, 'clicked reconciled');
+	assertEqual(sent.stats.totalRecipients, 3, 'recipients reconciled');
+	assert(sent.stats.deliveryCompletedAt !== null, 'completion timestamp stamped');
+});
+
+test('DeliveryQueueManager runs batches and reconciles a full distribution', async () => {
+	// NOTE: the suite runner awaits every async case before reporting.
+	const queue = new DeliveryQueueManager();
+	const issue = new IssueStore().items[0];
+	const audience = new SubscriberStore().items
+		.filter((subscriber) => subscriber.status === 'active')
+		.slice(0, 6);
+
+	const enqueued = queue.enqueueIssue(issue, audience);
+	assertEqual(enqueued, 6, 'one job per recipient');
+	assertEqual(queue.totalQueueCount, 6, 'queue size tracked');
+	assertEqual(queue.progressPercent, 0, 'progress starts at zero');
+	assertEqual(queue.statusCounts.queued, 6, 'all jobs start queued');
+
+	let processedNotifications = 0;
+	const result = await queue.runDistribution(
+		{ batchSize: 2, minLatencyMs: 0, maxLatencyMs: 1, randomSource: () => 0.9 },
+		() => {
+			processedNotifications++;
+		}
+	);
+
+	assertEqual(result.cancelled, false, 'run completed normally');
+	assertEqual(result.delivered, 6, 'all delivered with a low-entropy random source');
+	assertEqual(result.bounced, 0, 'no bounces');
+	assertEqual(processedNotifications, 6, 'per-job callback fired');
+	assertEqual(queue.processedCount, 6, 'processed counter');
+	assertEqual(queue.progressPercent, 100, 'progress completed');
+	assertEqual(queue.isProcessing, false, 'engine released after the run');
+	assertEqual(
+		queue.jobs.every((job) => job.processedAt !== null && job.attemptCount === 1),
+		true,
+		'each job recorded a processed timestamp and one attempt'
+	);
+
+	queue.reset();
+	assertEqual(queue.totalQueueCount, 0, 'reset clears the queue');
+	assertEqual(queue.jobs.length, 0, 'reset drops the job log');
+});
+
+test('DeliveryQueueManager marks every job as bounced at zero entropy', async () => {
+	const queue = new DeliveryQueueManager();
+	const issue = new IssueStore().items[0];
+	const audience = new SubscriberStore().items.slice(0, 3);
+
+	queue.enqueueIssue(issue, audience);
+	const result = await queue.runDistribution({
+		batchSize: 3,
+		minLatencyMs: 0,
+		maxLatencyMs: 1,
+		randomSource: () => 0
+	});
+
+	assertEqual(result.bounced, 3, 'every job bounced');
+	assertEqual(result.delivered, 0, 'nothing delivered');
+	assert(
+		queue.jobs.every((job) => job.errorMessage !== null),
+		'bounced jobs carry a diagnostic message'
+	);
+});
+
+test('DeliveryQueueManager halts on cancellation and pauses on demand', async () => {
+	const queue = new DeliveryQueueManager();
+	const issue = new IssueStore().items[0];
+	const audience = new SubscriberStore().items.slice(0, 8);
+
+	queue.enqueueIssue(issue, audience);
+
+	const running = queue.runDistribution({
+		batchSize: 1,
+		minLatencyMs: 5,
+		maxLatencyMs: 8,
+		randomSource: () => 0.9
+	});
+
+	// Pause, then verify the engine stops making progress before resuming.
+	queue.pause();
+	assertEqual(queue.isPaused, true, 'pause flag set');
+
+	await new Promise((resolve) => setTimeout(resolve, 60));
+	const processedWhilePaused = queue.processedCount;
+	await new Promise((resolve) => setTimeout(resolve, 60));
+	assertEqual(queue.processedCount, processedWhilePaused, 'no progress while paused');
+
+	queue.resume();
+	assertEqual(queue.isPaused, false, 'resume flag cleared');
+
+	// Halt the run before it can complete.
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	queue.cancelDistribution();
+
+	const result = await running;
+	assertEqual(result.cancelled, true, 'cancelled run reports cancellation');
+	assert(queue.processedCount < 8, `halted early (processed ${queue.processedCount})`);
+	assertEqual(queue.isProcessing, false, 'engine released after cancellation');
+});
+
+test('DeliveryQueueManager refuses to enqueue while a run is active', async () => {
+	const queue = new DeliveryQueueManager();
+	const issue = new IssueStore().items[0];
+	const audience = new SubscriberStore().items.slice(0, 2);
+
+	queue.enqueueIssue(issue, audience);
+	const running = queue.runDistribution({ batchSize: 1, minLatencyMs: 5, maxLatencyMs: 6 });
+
+	let threw = false;
+	try {
+		queue.enqueueIssue(issue, audience);
+	} catch {
+		threw = true;
+	}
+	assertEqual(threw, true, 'concurrent enqueue rejected');
+
+	queue.cancelDistribution();
+	await running;
+});
+
+test('ToastStore queues, caps and dismisses notifications', () => {
+	const toasts = new ToastStore();
+
+	toasts.success('Saved', 'Subscriber created');
+	toasts.error('Import failed', '2 rows rejected');
+	toasts.warning('Heads up', 'List hygiene due');
+	toasts.info('Heads up', 'Scheduled run queued');
+	toasts.info('Overflow', 'Stack is capped');
+
+	assertEqual(toasts.toasts.length, 4, 'visible stack capped at four');
+	assertEqual(toasts.toasts[0].title, 'Overflow', 'newest toast first');
+	assertEqual(toasts.toasts[0].variant, 'info', 'variant preserved');
+
+	const firstId = toasts.toasts[0].id;
+	toasts.dismiss(firstId);
+	assertEqual(
+		toasts.toasts.some((toast) => toast.id === firstId),
+		false,
+		'dismissed toast removed'
+	);
+
+	toasts.clear();
+	assertEqual(toasts.toasts.length, 0, 'clear empties the stack');
+});
+
+/* ------------------------------------------------------------------ */
 /* runner                                                              */
 /* ------------------------------------------------------------------ */
 
-export function runSuite(): SuiteResult {
+export async function runSuite(): Promise<SuiteResult> {
 	const executed: CaseResult[] = [];
 
 	for (const testCase of cases) {
 		try {
-			testCase.run();
+			await testCase.run();
 			executed.push({ name: testCase.name, ok: true });
 		} catch (error) {
 			executed.push({
@@ -532,12 +874,6 @@ export function runSuite(): SuiteResult {
 		total: executed.length,
 		failures
 	};
-}
-
-/** Convenience export so the Node runner can print a per-case report. */
-export function runSuiteDetailed(): { results: CaseResult[]; summary: SuiteResult } {
-	const summary = runSuite();
-	return { results: cases.map((testCase) => ({ name: testCase.name, ok: !summary.failures.some((failure) => failure.startsWith(testCase.name)) })), summary };
 }
 
 export type { CsvImportResult };

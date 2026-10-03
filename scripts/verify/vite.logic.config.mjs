@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { svelte, vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vite';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -8,11 +9,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
  * Builds the deterministic logic suite into a browser-safe ES module.
  *
  * The suite is shared by the Node runner (`run-logic.mjs`) and the headless
- * Chrome runner (`chrome-logic.mjs`), so every pure rule in `#lib/utils` and
- * `#lib/storage` is verified twice — once in Node, once inside a real browser.
+ * Chrome runner (`chrome-logic.mjs`), so every pure rule in `#lib/utils`,
+ * `#lib/storage` and the Svelte 5 rune stores in `#lib/state` is verified twice —
+ * once in Node, once inside a real browser.
  */
 export default defineConfig({
 	root,
+	// Required so `.svelte.ts` rune modules compile outside a SvelteKit build.
+	plugins: [svelte({ configFile: false, preprocess: vitePreprocess() })],
 	resolve: {
 		alias: {
 			'#lib': path.resolve(root, 'src/lib')
