@@ -7,6 +7,7 @@
 	import IssueEditor from '#lib/components/panel/IssueEditor.svelte';
 	import IssuePreviewPane from '#lib/components/panel/IssuePreviewPane.svelte';
 	import Button from '#lib/components/ui/Button.svelte';
+	import Skeleton from '#lib/components/ui/Skeleton.svelte';
 	import { getIssueState } from '#lib/state/issue.svelte';
 	import { getSubscriberState } from '#lib/state/subscriber.svelte';
 	import { getToastState } from '#lib/state/toast.svelte';
@@ -23,6 +24,14 @@
 	const issueId = $derived(page.params.id ?? '');
 
 	const issue = $derived(issueStore.getById(issueId));
+
+	/**
+	 * [UX-01] The store is seeded with fixtures so the server render and the first
+	 * client render agree; persisted data arrives during hydration. Until then the
+	 * route must not claim the issue is missing, which would flash a false 404 on a
+	 * direct URL visit and then swap to the editor.
+	 */
+	const isReady = $derived(issueStore.isHydrated);
 
 	let isMobileNavOpen = $state(false);
 
@@ -149,7 +158,25 @@
 
 		<main id="main-content" class="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 sm:pb-12">
 			<div class="max-w-6xl mx-auto">
-				{#if issue && draft}
+				{#if !isReady}
+					<!-- Placeholder mirrors the editor layout so the layout does not jump. -->
+					<div
+						class="bg-white border border-stone-200 rounded-lg shadow-panel p-5 space-y-5"
+						role="status"
+						aria-live="polite"
+					>
+						<span class="sr-only">Loading issue…</span>
+						<Skeleton variant="text" width="w-32" height="h-3" />
+						<Skeleton variant="block" height="h-12" />
+						<Skeleton variant="block" height="h-9" />
+						<Skeleton lines={3} />
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+							<Skeleton variant="block" height="h-11" />
+							<Skeleton variant="block" height="h-11" />
+						</div>
+						<Skeleton variant="block" height="h-64" />
+					</div>
+				{:else if issue && draft}
 					<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 						<div class="bg-white border border-stone-200 rounded-lg shadow-panel p-5">
 							<IssueEditor

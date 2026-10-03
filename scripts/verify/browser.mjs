@@ -156,6 +156,13 @@ export function attachDiagnostics(page, sink) {
 		}
 	});
 	page.on('pageerror', (error) => sink.push(`pageerror: ${error.message}`));
+	// Surface the URL behind any 4xx/5xx so a failure is actionable without a
+	// second debugging pass.
+	page.on('response', (response) => {
+		if (response.status() >= 400) {
+			sink.push(`http ${response.status()}: ${response.url()}`);
+		}
+	});
 	page.on('requestfailed', (request) => {
 		const failure = request.failure();
 		if (failure && !/net::ERR_ABORTED/.test(failure.errorText)) {

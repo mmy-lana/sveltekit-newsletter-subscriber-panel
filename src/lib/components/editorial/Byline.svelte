@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formatDate, formatRelativeTime, toInitials } from '#lib/utils/format';
+	import { toSafeImageSource } from '#lib/utils/validators';
 
 	interface Props {
 		authorName: string;
@@ -28,12 +29,18 @@
 	const nameParts = $derived(authorName.trim().split(/\s+/));
 	const firstName = $derived(nameParts[0] ?? '');
 	const lastName = $derived(nameParts.slice(1).join(' '));
+
+	/**
+	 * Author avatars are remote, author-supplied values; only http(s) and
+	 * same-origin paths are allowed through to the image element.
+	 */
+	const avatarSrc = $derived(toSafeImageSource(authorAvatarUrl));
 </script>
 
 <div class="flex items-center gap-3 {customClass}">
-	{#if authorAvatarUrl}
+	{#if avatarSrc}
 		<img
-			src={authorAvatarUrl}
+			src={avatarSrc}
 			alt=""
 			width="80"
 			height="80"

@@ -33,14 +33,22 @@ import {
 } from '#lib/utils/format';
 import {
 	clamp,
+	isSafeImageSource,
 	normalizeEmail,
 	parseTimestamp,
 	roundTo,
 	sanitizeSlug,
+	toSafeImageSource,
 	validateEmail,
 	validateHexColor,
 	validateHttpUrl
 } from '#lib/utils/validators';
+import {
+	getBodyScrollLockCount,
+	lockBodyScroll,
+	resetBodyScrollLock,
+	unlockBodyScroll
+} from '#lib/utils/scroll-lock';
 import { generateUuid } from '#lib/utils/uuid';
 
 // Phase 4 — Svelte 5 rune stores (state, derived values and the dispatch engine).
@@ -577,6 +585,84 @@ test('seed issue markdown renders to non-empty sanitised HTML', () => {
 		assert(!html.includes('<script'), `issue ${issue.id} contains script markup`);
 		assert(issue.excerpt.length > 0, `issue ${issue.id} missing excerpt`);
 	}
+});
+
+/* ------------------------------------------------------------------ */
+/* Phase 2 — protocol hygiene and overlay coordination                 */
+/* ------------------------------------------------------------------ */
+
+test('isSafeImageSource allow-lists image schemes', () => {
+	// [SEC-02] Author-supplied URLs reach an image attribute, so scriptable and
+	// cross-origin-scheme values must never be rendered.
+	assert(isSafeImageSource('https://cdn.example.com/cover.png'), 'https allowed');
+	assert(isSafeImageSource('http://example.com/a.jpg'), 'http allowed');
+	assert(isSafeImageSource('/static/cover.png'), 'same-origin path allowed');
+	assert(isSafeImageSource('  /static/cover.png  '), 'whitespace trimmed');
+
+	assert(!isSafeImageSource('javascript:alert(1)'), 'javascript scheme rejected');
+	assert(!isSafeImageSource('data:image/svg+xml;base64,PHN2Zz4='), 'data URI rejected');
+	assert(!isSafeImageSource('//evil.example.com/track.png'), 'protocol-relative rejected');
+	assert(!isSafeImageSource('vbscript:msgbox'), 'vbscript rejected');
+	assert(!isSafeImageSource('file:///etc/passwd'), 'file scheme rejected');
+	assert(!isSafeImageSource(''), 'empty string rejected');
+	assert(!isSafeImageSource('   '), 'whitespace-only rejected');
+	assert(!isSafeImageSource(null), 'null rejected');
+	assert(!isSafeImageSource(undefined), 'undefined rejected');
+
+	assertEqual(toSafeImageSource('https://cdn.example.com/a.png'), 'https://cdn.example.com/a.png', 'safe value passes through');
+	assertEqual(toSafeImageSource(' https://cdn.example.com/a.png '), 'https://cdn.example.com/a.png', 'safe value trimmed');
+	assertEqual(toSafeImageSource('javascript:alert(1)'), null, 'unsafe value becomes null');
+	assertEqual(toSafeImageSource(null), null, 'null becomes null');
+});
+
+test('scroll lock is reference counted', () => {
+	// [RES-01] Two overlapping overlays must not release the body when only one closes.
+	const hasDom = typeof document !== 'undefined';
+
+	resetBodyScrollLock();
+
+	if (!hasDom) {
+		// Server: the API is a no-op and must never throw.
+		lockBodyScroll();
+		unlockBodyScroll();
+		assertEqual(getBodyScrollLockCount(), 0, 'lock count stays at zero without a document');
+		return;
+	}
+
+	document.body.style.overflow = '';
+
+	// First holder captures and freezes the body.
+	lockBodyScroll();
+	assertEqual(getBodyScrollLockCount(), 1, 'one holder');
+	assertEqual(document.body.style.overflow, 'hidden', 'body frozen');
+
+	// Second (overlapping) holder does not double-apply anything.
+	lockBodyScroll();
+	assertEqual(getBodyScrollLockCount(), 2, 'two holders');
+	assertEqual(document.body.style.overflow, 'hidden', 'body still frozen');
+
+	// The inner overlay closes: the body must stay locked for the outer one.
+	unlockBodyScroll();
+	assertEqual(getBodyScrollLockCount(), 1, 'one holder remaining');
+	assertEqual(document.body.style.overflow, 'hidden', 'body remains frozen while an overlay survives');
+
+	// The last holder closes: the pre-lock value is restored.
+	unlockBodyScroll();
+	assertEqual(getBodyScrollLockCount(), 0, 'no holders');
+	assertEqual(document.body.style.overflow, '', 'body released');
+
+	// Unbalanced unlocks must not drive the counter negative or clear the body.
+	unlockBodyScroll();
+	assertEqual(getBodyScrollLockCount(), 0, 'counter clamped at zero');
+	assertEqual(document.body.style.overflow, '', 'body untouched by an extra unlock');
+
+	// A pre-existing inline overflow value is preserved across the lock window.
+	document.body.style.overflow = 'auto';
+	lockBodyScroll();
+	assertEqual(document.body.style.overflow, 'hidden', 'body frozen over a pre-existing value');
+	unlockBodyScroll();
+	assertEqual(document.body.style.overflow, 'auto', 'pre-existing value restored');
+	document.body.style.overflow = '';
 });
 
 /* ------------------------------------------------------------------ */

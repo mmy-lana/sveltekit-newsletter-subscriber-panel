@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { NewsletterIssue } from '#lib/types/newsletter';
 	import Byline from '#lib/components/editorial/Byline.svelte';
+	import { toSafeImageSource } from '#lib/utils/validators';
 
 	interface Props {
 		issue: NewsletterIssue;
@@ -10,6 +11,13 @@
 	}
 
 	let { issue, readingMinutes, issueNumber = null }: Props = $props();
+
+	/**
+	 * The cover URL is author-supplied, so it is allow-listed before it reaches an
+	 * image attribute: an untrusted `javascript:`/`data:`/`//host` value is dropped
+	 * rather than rendered.
+	 */
+	const coverImageSrc = $derived(toSafeImageSource(issue.coverImageUrl));
 </script>
 
 <header class="space-y-5">
@@ -41,9 +49,9 @@
 		{issueNumber}
 	/>
 
-	{#if issue.coverImageUrl}
+	{#if coverImageSrc}
 		<img
-			src={issue.coverImageUrl}
+			src={coverImageSrc}
 			alt=""
 			width="1200"
 			height="480"

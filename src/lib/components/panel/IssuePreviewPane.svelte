@@ -3,6 +3,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import { formatAudienceLabel, formatDate, formatPercentFixed } from '#lib/utils/format';
 	import { renderEditorialMarkdown } from '#lib/utils/markdown-renderer';
+	import { toSafeImageSource } from '#lib/utils/validators';
 
 	interface Props {
 		issue: NewsletterIssue;
@@ -27,6 +28,9 @@
 	);
 
 	const hasStats = $derived(issue.stats.totalRecipients > 0);
+
+	/** Allow-listed cover image; untrusted schemes are dropped, never rendered. */
+	const coverImageSrc = $derived(toSafeImageSource(issue.coverImageUrl));
 </script>
 
 <section
@@ -52,9 +56,9 @@
 	</header>
 
 	<div class="px-5 py-4 border-b border-stone-200 space-y-3">
-		{#if issue.coverImageUrl}
+		{#if coverImageSrc}
 			<img
-				src={issue.coverImageUrl}
+				src={coverImageSrc}
 				alt=""
 				width="1200"
 				height="480"

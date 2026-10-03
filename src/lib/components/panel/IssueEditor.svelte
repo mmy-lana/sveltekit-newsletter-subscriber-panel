@@ -6,7 +6,7 @@
 	import Input from '#lib/components/ui/Input.svelte';
 	import Select from '#lib/components/ui/Select.svelte';
 	import Textarea from '#lib/components/ui/Textarea.svelte';
-	import { isNonEmpty, toPlainText } from '#lib/utils/validators';
+	import { isNonEmpty, isSafeImageSource, toPlainText } from '#lib/utils/validators';
 
 	/** Metadata fields the editor owns; stats and identity stay with the store. */
 	export type IssueEditorDraft = Pick<
@@ -95,6 +95,20 @@
 		isNonEmpty(form.title) || !validationError ? undefined : (validationError ?? undefined)
 	);
 
+	/**
+	 * [SEC-02] The cover image URL is author-supplied and ends up in an image
+	 * attribute, so anything that is not an absolute http(s) URL or a same-origin
+	 * path is rejected before it can be saved.
+	 */
+	const coverUrlError = $derived(
+		form.coverImageUrl.trim().length > 0 && !isSafeImageSource(form.coverImageUrl)
+			? 'Enter an https:// image URL, or a path beginning with "/".'
+			: undefined
+	);
+
+	/** Parent-supplied problem takes precedence; either one blocks the save. */
+	const blockingError = $derived(validationError ?? coverUrlError ?? null);
+
 	const audienceOptions: SelectOption[] = [
 		{ value: 'all', label: 'All subscribers' },
 		{ value: 'free_only', label: 'Free tier only' },
@@ -131,16 +145,16 @@
 				size="sm"
 				onclick={onsave}
 				loading={isSaving}
-				disabled={!isDirty || Boolean(validationError)}
+				disabled={!isDirty || Boolean(blockingError)}
 			>
 				Save Changes
 			</Button>
 		</div>
 	</div>
 
-	{#if validationError}
+	{#if blockingError}
 		<p class="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded p-2" role="alert">
-			{validationError}
+			{blockingError}
 		</p>
 	{/if}
 
@@ -205,7 +219,8 @@
 		bind:value={form.coverImageUrl}
 		oninput={() => update({ coverImageUrl: form.coverImageUrl })}
 		placeholder="https://…"
-		hint="Optional. Leave empty for a text-only issue."
+		error={coverUrlError}
+		hint="Optional. Accepts an absolute https:// URL or a path beginning with “/”."
 	/>
 
 	<div>

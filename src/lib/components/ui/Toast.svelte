@@ -3,13 +3,17 @@
 
 	interface ToastProps {
 		toasts: ToastMessage[];
-		/** How long a toast stays visible, in milliseconds. */
-		duration?: number;
 		ondismiss: (id: string) => void;
 		class?: string;
 	}
 
-	let { toasts, duration = 5000, ondismiss, class: customClass = '' }: ToastProps = $props();
+	/**
+	 * This component is presentational: it renders whatever the store holds and
+	 * forwards manual dismissals. Auto-dismiss timers are scheduled exclusively by
+	 * `ToastStore.push`, so a toast has exactly one timer and cannot be dismissed
+	 * twice (or resurrected) by a second scheduler reacting to list changes.
+	 */
+	let { toasts, ondismiss, class: customClass = '' }: ToastProps = $props();
 
 	const variantStyles: Record<ToastMessage['variant'], string> = {
 		success: 'bg-stone-900 text-stone-50 border-stone-900',
@@ -29,19 +33,6 @@
 		new Set<ToastMessage['variant']>(['error', 'warning'])
 	);
 
-	// Auto-dismiss every visible toast after `duration`; the timer restarts
-	// whenever the list changes so a new toast is never dismissed early.
-	$effect(() => {
-		if (typeof window === 'undefined' || toasts.length === 0) return;
-
-		const timer = window.setTimeout(() => {
-			for (const toast of toasts) {
-				ondismiss(toast.id);
-			}
-		}, duration);
-
-		return () => window.clearTimeout(timer);
-	});
 </script>
 
 <!--

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { lockBodyScroll, unlockBodyScroll } from '#lib/utils/scroll-lock';
 	import type { Snippet } from 'svelte';
 
 	interface NavItem {
@@ -32,15 +33,16 @@
 		return pathname === href || pathname.startsWith(`${href}/`);
 	}
 
-	// Lock background scrolling while the drawer covers the viewport.
+	// Lock background scrolling while the drawer covers the viewport. The lock is
+	// shared with Modal, so closing a modal layered over the drawer leaves the
+	// body frozen until the drawer itself closes.
 	$effect(() => {
 		if (typeof document === 'undefined' || !isMobileOpen) return;
 
-		const previousOverflow = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
+		lockBodyScroll();
 
 		return () => {
-			document.body.style.overflow = previousOverflow;
+			unlockBodyScroll();
 		};
 	});
 </script>

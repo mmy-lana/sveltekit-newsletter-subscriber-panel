@@ -89,6 +89,32 @@ export function validateHttpUrl(value: string): boolean {
 	}
 }
 
+/**
+ * True when a value is safe to place in an image `src`.
+ *
+ * Allows absolute `http(s)` URLs and same-origin absolute paths. Everything else
+ * is rejected, which blocks scriptable URIs (`javascript:`, `data:`) as well as
+ * protocol-relative references (`//host/path`), which would silently redirect the
+ * request to a third-party origin.
+ */
+export function isSafeImageSource(value: string | null | undefined): boolean {
+	if (!value) return false;
+
+	const trimmed = value.trim();
+	if (trimmed.length === 0) return false;
+	if (trimmed.startsWith('//')) return false;
+	if (trimmed.startsWith('/')) return true;
+
+	return validateHttpUrl(trimmed);
+}
+
+/** Returns the value when it is a safe image source, otherwise null. */
+export function toSafeImageSource(value: string | null | undefined): string | null {
+	if (!isSafeImageSource(value)) return null;
+	const trimmed = value!.trim();
+	return trimmed;
+}
+
 /** True when the string is a valid `#rrggbb` or `#rgb` CSS hex colour. */
 export function validateHexColor(value: string): boolean {
 	return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value.trim());

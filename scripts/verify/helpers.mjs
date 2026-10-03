@@ -70,14 +70,28 @@ export async function clickButton(page, text) {
 	);
 }
 
-/** Replaces the value of a form control and fires the events Svelte listens to. */
+/**
+ * Replaces the value of a form control and fires the events Svelte listens to.
+ *
+ * The field is cleared through the DOM before typing: triple-click selection is
+ * not dependable for every control, and a partial selection would concatenate the
+ * new value onto the old one — which silently produces a *valid looking* input
+ * (for example a same-origin path) and hides the behaviour under test.
+ */
 export async function fillInput(page, selector, value) {
 	await page.waitForSelector(selector, { timeout: 10000 });
-	await page.click(selector, { clickCount: 3 });
-	await page.keyboard.press('Backspace');
+
+	await page.focus(selector);
+	await page.$eval(selector, (node) => {
+		if (typeof node.select === 'function') node.select();
+		node.value = '';
+		node.dispatchEvent(new Event('input', { bubbles: true }));
+	});
+
 	if (value.length > 0) {
 		await page.type(selector, value);
 	}
+
 	// Guarantee the Svelte-bound value is committed even for exotic inputs.
 	await page.$eval(
 		selector,

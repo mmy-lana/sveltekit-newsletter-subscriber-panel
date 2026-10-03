@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { lockBodyScroll, unlockBodyScroll } from '#lib/utils/scroll-lock';
 
 	interface ModalProps {
 		isOpen?: boolean;
@@ -75,12 +76,14 @@
 	}
 
 	// Lock background scrolling and move focus into the dialog while it is open.
+	// The lock is reference-counted, so closing this dialog does not release the
+	// scroll lock still held by an overlay underneath it (for example the mobile
+	// navigation drawer).
 	$effect(() => {
 		if (typeof document === 'undefined' || !isOpen) return;
 
 		previouslyFocused = document.activeElement as HTMLElement | null;
-		const previousOverflow = document.body.style.overflow;
-		document.body.style.overflow = 'hidden';
+		lockBodyScroll();
 
 		queueMicrotask(() => {
 			if (!panel) return;
@@ -89,7 +92,7 @@
 		});
 
 		return () => {
-			document.body.style.overflow = previousOverflow;
+			unlockBodyScroll();
 			previouslyFocused?.focus?.();
 			previouslyFocused = null;
 		};
