@@ -126,8 +126,29 @@ async function main() {
 			const scenarioDiagnostics = [];
 			attachDiagnostics(page, scenarioDiagnostics);
 
+			// [LOW-02] The issue editor arms a `beforeunload` guard while an unsaved
+			// draft exists. Answering every prompt with "leave" mirrors the operator
+			// dismissing the browser's own wording and keeps the run deterministic;
+			// scenarios can assert on `beforeUnloadPrompts` to prove the guard fires
+			// exactly when it should.
+			const beforeUnloadPrompts = [];
+			page.on('dialog', async (dialog) => {
+				if (dialog.type() === 'beforeunload') {
+					beforeUnloadPrompts.push(dialog.message());
+					await dialog.accept();
+					return;
+				}
+				await dialog.dismiss();
+			});
+
 			try {
-				await scenario.run({ page, origin: ORIGIN, reporter, viewports: VIEWPORTS });
+				await scenario.run({
+					page,
+					origin: ORIGIN,
+					reporter,
+					viewports: VIEWPORTS,
+					beforeUnloadPrompts
+				});
 			} catch (error) {
 				const url = page.url();
 				reporter.expect(false, `${scenario.name}: threw ${error.message} (at ${url})`);

@@ -14,7 +14,14 @@ export interface SubscriberMetrics {
   emailsOpenedCount: number;
   linksClickedCount: number;
   lastOpenedAt: string | null;
+  /** Open rate = opens / received. */
   openRatePercent: number;
+  /**
+   * Click-to-open rate (CTOR) = clicks / opens.
+   *
+   * The field name is retained for storage compatibility; it is *not* the
+   * click-through rate (clicks / delivered), which is calculated per issue.
+   */
   clickRatePercent: number;
 }
 
@@ -137,8 +144,10 @@ export interface DashboardMetricsSummary {
   activeSubscribers: number;
   paidSubscribers: number;
   monthlyRevenueEst: number;
+  /** Open rate = opens / delivered, averaged across sent issues. */
   averageOpenRatePercent: number;
-  averageClickRatePercent: number;
+  /** Click-through rate (CTR) = clicks / delivered, averaged across sent issues. */
+  averageClickThroughRatePercent: number;
   thirtyDayGrowthCount: number;
   issuesSentCount: number;
 }

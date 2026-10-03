@@ -18,6 +18,17 @@ export class ToastStore {
 
 	private timers = new Map<string, ReturnType<typeof setTimeout>>();
 
+	/**
+	 * Number of auto-dismiss timers currently armed.
+	 *
+	 * [MED-02] It must never exceed `visibleToasts.length`: a timer without a toast
+	 * is a pending timeout that would fire later and mutate an unrelated queue.
+	 * Exposed so the cleanup invariant can be asserted rather than assumed.
+	 */
+	get pendingTimerCount(): number {
+		return this.timers.size;
+	}
+
 	visibleToasts = $derived(this.toasts.slice(0, MAX_VISIBLE_TOASTS));
 
 	push(variant: ToastVariant, title: string, message?: string, duration = TOAST_DURATION_MS): ToastMessage {
@@ -29,7 +40,21 @@ export class ToastStore {
 			createdAt: Date.now()
 		};
 
-		this.toasts = [toast, ...this.toasts].slice(0, MAX_VISIBLE_TOASTS);
+		const nextQueue = [toast, ...this.toasts].slice(0, MAX_VISIBLE_TOASTS);
+
+		// [MED-02] Slicing silently evicted the oldest messages while their
+		// auto-dismiss timers stayed armed: every evicted toast held a handle in
+		// `this.timers` until it fired, so the map grew past the visible cap and
+		// leaked a pending timeout per dropped message.
+		const retainedIds = new Set(nextQueue.map((entry) => entry.id));
+		for (const id of this.timers.keys()) {
+			if (retainedIds.has(id)) continue;
+			const timer = this.timers.get(id);
+			if (timer !== undefined) clearTimeout(timer);
+			this.timers.delete(id);
+		}
+
+		this.toasts = nextQueue;
 
 		if (typeof window !== 'undefined' && duration > 0) {
 			this.timers.set(

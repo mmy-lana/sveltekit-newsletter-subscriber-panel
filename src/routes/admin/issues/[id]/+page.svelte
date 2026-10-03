@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import type { NewsletterIssue } from '#lib/types/newsletter';
@@ -52,6 +53,16 @@
 	 */
 	const draftScheduledAt = $derived(draft ? fromDateTimeLocalValue(draft.scheduledAt ?? '') : null);
 
+	/**
+	 * The same normalisation applied to the persisted value.
+	 *
+	 * Stored timestamps are not guaranteed to be byte-identical to what the parser
+	 * emits (`2026-10-10T10:00:00Z` and `2026-10-10T10:00:00.000Z` are the same
+	 * instant). Comparing raw strings made a freshly opened issue look dirty, which
+	 * armed the unsaved-changes guard on a page nobody had edited.
+	 */
+	const storedScheduledAt = $derived(issue ? fromDateTimeLocalValue(issue.scheduledAt ?? '') : null);
+
 	/** Stored issue with the unsaved draft layered on top, for the live preview. */
 	const previewIssue = $derived.by<NewsletterIssue | null>(() => {
 		if (!issue) return null;
@@ -74,7 +85,7 @@
 			draft.authorName !== issue.authorName ||
 			draft.coverImageUrl !== (issue.coverImageUrl ?? '') ||
 			// Compared canonically so a draft that has just been saved reads as clean.
-			draftScheduledAt !== (issue.scheduledAt ?? null) ||
+			draftScheduledAt !== storedScheduledAt ||
 			draft.tags.join(',') !== issue.tags.join(',')
 		);
 	});
@@ -143,16 +154,36 @@
 		toastStore.success('Issue saved', issue.title);
 	}
 
-	function handleDelete(): void {
+	async function handleDelete(): Promise<void> {
 		if (!issue) return;
+		const deletedTitle = issue.title;
 		issueStore.deleteIssue(issue.id);
-		toastStore.success('Issue deleted', issue.title);
+		toastStore.success('Issue deleted', deletedTitle);
+
+		// [MED-01] This route is keyed by the issue id. Deleting the record in place
+		// strands the operator on a URL that no longer resolves, so the only content
+		// left on screen is the "Issue not found" panel. Return to the collection.
+		await goto('/admin/issues');
+	}
+
+	/**
+	 * [LOW-02] Guard against losing an edited dispatch to a tab close, a refresh or a
+	 * navigation away from the site. Browsers ignore the custom message and show
+	 * their own generic prompt, but `preventDefault()` plus an assigned `returnValue`
+	 * is what arms it.
+	 */
+	function handleBeforeUnload(event: BeforeUnloadEvent): void {
+		if (!isDirty) return;
+		event.preventDefault();
+		event.returnValue = '';
 	}
 </script>
 
 <svelte:head>
 	<title>{issue ? `${issue.title} — Editor` : 'Issue not found'}</title>
 </svelte:head>
+
+<svelte:window onbeforeunload={handleBeforeUnload} />
 
 <div class="flex h-[100dvh] bg-paper overflow-hidden">
 	<a

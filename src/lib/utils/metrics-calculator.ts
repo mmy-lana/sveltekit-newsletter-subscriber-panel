@@ -45,8 +45,42 @@ export function createEmptyIssueStats(): IssueDeliveryStats {
 }
 
 /**
+ * Open rate: opens / delivered.
+ * [MED-03] Named explicitly so callers cannot confuse it with a click rate.
+ */
+export function calculateOpenRate(openedCount: number, deliveredCount: number): number {
+	if (deliveredCount <= 0) return 0;
+	return roundTo((openedCount / deliveredCount) * 100, 1);
+}
+
+/**
+ * Click-to-open rate (CTOR): clicks / opens.
+ *
+ * [MED-03] This is the share of *engaged* readers who clicked. It is a different
+ * number from the click-through rate below; the two were previously presented
+ * under the same "Click-through" label.
+ */
+export function calculateClickToOpenRate(clickedCount: number, openedCount: number): number {
+	if (openedCount <= 0) return 0;
+	return roundTo((clickedCount / openedCount) * 100, 1);
+}
+
+/**
+ * Click-through rate (CTR): clicks / delivered.
+ *
+ * [MED-03] This is the share of *delivered messages* that produced a click.
+ */
+export function calculateClickThroughRate(clickedCount: number, deliveredCount: number): number {
+	if (deliveredCount <= 0) return 0;
+	return roundTo((clickedCount / deliveredCount) * 100, 1);
+}
+
+/**
  * Recomputes the cached engagement percentages from raw counters.
  * Guards against division by zero and against clicks exceeding opens.
+ *
+ * [MED-03] `openRatePercent` is opens / received; `clickRatePercent` is the
+ * click-to-open rate (clicks / opens), not the click-through rate.
  */
 export function recalculateEngagement(metrics: SubscriberMetrics): SubscriberMetrics {
 	const received = Math.max(0, metrics.emailsReceivedCount);
@@ -59,40 +93,44 @@ export function recalculateEngagement(metrics: SubscriberMetrics): SubscriberMet
 		emailsOpenedCount: opened,
 		linksClickedCount: clicked,
 		openRatePercent: received > 0 ? roundTo((opened / received) * 100, 1) : 0,
-		clickRatePercent: opened > 0 ? roundTo((clicked / opened) * 100, 1) : 0
+		clickRatePercent: calculateClickToOpenRate(clicked, opened)
 	};
 }
 
 /**
- * Issue-weighted open rate: the mean of each sent issue's open rate.
- * An issue that delivered nothing contributes a hard 0.0% rather than being
- * excluded, so the average never inflates itself.
+ * Issue-weighted open rate: the mean of each sent issue's open rate (opens /
+ * delivered). An issue that delivered nothing contributes a hard 0.0% rather than
+ * being excluded, so the average never inflates itself.
  */
 export function calculateIssueWeightedOpenRate(issues: NewsletterIssue[]): number {
 	const sentIssues = issues.filter((issue) => issue.status === 'sent');
 	if (sentIssues.length === 0) return 0;
 
-	const total = sentIssues.reduce((accumulator, issue) => {
-		const rate = issue.stats.deliveredCount > 0
-			? (issue.stats.openedCount / issue.stats.deliveredCount) * 100
-			: 0;
-		return accumulator + rate;
-	}, 0);
+	const total = sentIssues.reduce(
+		(accumulator, issue) => accumulator + calculateOpenRate(issue.stats.openedCount, issue.stats.deliveredCount),
+		0
+	);
 
 	return roundTo(total / sentIssues.length, 1);
 }
 
-/** Mean open rate across sent issues (no weighting by delivery volume). */
-export function calculateIssueWeightedClickRate(issues: NewsletterIssue[]): number {
+/**
+ * Issue-weighted click-through rate (CTR): the mean of each sent issue's clicks /
+ * delivered. Mean across issues, not weighted by delivery volume.
+ *
+ * [MED-03] Renamed from `calculateIssueWeightedClickRate`: the previous name (and
+ * its doc comment, which described an open rate) invited the confusion between
+ * clicks / delivered (CTR) and clicks / opens (CTOR).
+ */
+export function calculateIssueWeightedClickThroughRate(issues: NewsletterIssue[]): number {
 	const sentIssues = issues.filter((issue) => issue.status === 'sent');
 	if (sentIssues.length === 0) return 0;
 
-	const total = sentIssues.reduce((accumulator, issue) => {
-		const rate = issue.stats.deliveredCount > 0
-			? (issue.stats.clickedCount / issue.stats.deliveredCount) * 100
-			: 0;
-		return accumulator + rate;
-	}, 0);
+	const total = sentIssues.reduce(
+		(accumulator, issue) =>
+			accumulator + calculateClickThroughRate(issue.stats.clickedCount, issue.stats.deliveredCount),
+		0
+	);
 
 	return roundTo(total / sentIssues.length, 1);
 }
@@ -106,8 +144,8 @@ export function calculateAudienceOpenRate(subscribers: Subscriber[]): number {
 	return roundTo(total / engaged.length, 1);
 }
 
-/** Mean click rate across subscribers that have received at least one issue. */
-export function calculateAudienceClickRate(subscribers: Subscriber[]): number {
+/** Mean click-to-open rate (CTOR: clicks / opens) across subscribers that received at least one issue. */
+export function calculateAudienceClickToOpenRate(subscribers: Subscriber[]): number {
 	const engaged = subscribers.filter((subscriber) => subscriber.metrics.emailsReceivedCount > 0);
 	if (engaged.length === 0) return 0;
 
@@ -188,7 +226,7 @@ export function calculateDashboardMetrics(
 		paidSubscribers: paidSubscribers.length,
 		monthlyRevenueEst,
 		averageOpenRatePercent: calculateIssueWeightedOpenRate(issues),
-		averageClickRatePercent: calculateIssueWeightedClickRate(issues),
+		averageClickThroughRatePercent: calculateIssueWeightedClickThroughRate(issues),
 		thirtyDayGrowthCount,
 		issuesSentCount: issues.filter((issue) => issue.status === 'sent').length
 	};

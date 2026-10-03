@@ -3,6 +3,7 @@
 	import Badge from '#lib/components/ui/Badge.svelte';
 	import { formatAudienceLabel, formatDate, formatPercentFixed } from '#lib/utils/format';
 	import { renderEditorialMarkdown } from '#lib/utils/markdown-renderer';
+	import { calculateClickThroughRate, calculateOpenRate } from '#lib/utils/metrics-calculator';
 	import { toSafeImageSource } from '#lib/utils/validators';
 
 	interface Props {
@@ -28,6 +29,18 @@
 	);
 
 	const hasStats = $derived(issue.stats.totalRecipients > 0);
+
+	/**
+	 * [MED-03] Rates come from the shared calculator so this panel cannot drift
+	 * from the dispatch modal: open rate = opens / delivered,
+	 * click-through (CTR) = clicks / delivered.
+	 */
+	const openRatePercent = $derived(
+		calculateOpenRate(issue.stats.openedCount, issue.stats.deliveredCount)
+	);
+	const clickThroughRatePercent = $derived(
+		calculateClickThroughRate(issue.stats.clickedCount, issue.stats.deliveredCount)
+	);
 
 	/** Allow-listed cover image; untrusted schemes are dropped, never rendered. */
 	const coverImageSrc = $derived(toSafeImageSource(issue.coverImageUrl));
@@ -98,13 +111,10 @@
 		{#if hasStats}
 			<div class="flex flex-wrap gap-4 text-xs font-mono tabular-nums border-t border-stone-100 pt-3">
 				<span class="text-stone-600">
-					Open rate <strong class="text-stone-900">
-						{formatPercentFixed(
-							issue.stats.deliveredCount > 0
-								? (issue.stats.openedCount / issue.stats.deliveredCount) * 100
-								: 0
-						)}
-					</strong>
+					Open rate <strong class="text-stone-900">{formatPercentFixed(openRatePercent)}</strong>
+				</span>
+				<span class="text-stone-600">
+					Click-through <strong class="text-stone-900">{formatPercentFixed(clickThroughRatePercent)}</strong>
 				</span>
 				<span class="text-stone-600">
 					Delivered <strong class="text-stone-900">{issue.stats.deliveredCount}</strong>

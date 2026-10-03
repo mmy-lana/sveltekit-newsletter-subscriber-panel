@@ -466,6 +466,39 @@ export default [
 	},
 
 	{
+		name: 'phase5/unsaved-changes-guard',
+		async run({ page, origin, reporter, beforeUnloadPrompts }) {
+			await page.setViewport({ width: 1440, height: 900 });
+			await goto(page, '/admin/issues/issue-001', origin);
+			await waitForHydration(page);
+
+			// [LOW-02] A freshly opened issue is clean: leaving must not prompt.
+			reporter.expect(
+				(await pageContains(page, 'No changes yet')) || (await pageContains(page, 'Saved')),
+				'the editor opens in a clean state'
+			);
+
+			await fillInput(page, '#issue-title', 'Guard Rail Regression');
+			await waitForStep(page, () => document.body.innerText.includes('Unsaved changes'), 'dirty state');
+
+			// Leaving the page with unsaved work must raise the browser guard.
+			await goto(page, '/admin/issues', origin);
+			reporter.expectEqual(
+				beforeUnloadPrompts.length,
+				1,
+				'navigating away from an unsaved draft raises the browser guard'
+			);
+			reporter.expectEqual(
+				await page.evaluate(() => window.location.pathname),
+				'/admin/issues',
+				'the navigation completes once the guard is answered'
+			);
+
+			await page.evaluate(() => localStorage.removeItem('snsp_issues_v1'));
+		}
+	},
+
+	{
 		name: 'phase5/public-archive-and-article',
 		async run({ page, origin, reporter }) {
 			await page.setViewport({ width: 1024, height: 900 });

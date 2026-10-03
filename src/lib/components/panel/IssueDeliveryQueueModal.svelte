@@ -5,6 +5,7 @@
 	import Modal from '#lib/components/ui/Modal.svelte';
 	import DeliveryProgressBar from '#lib/components/panel/DeliveryProgressBar.svelte';
 	import { formatAudienceLabel } from '#lib/utils/format';
+	import { calculateClickThroughRate, calculateClickToOpenRate, calculateOpenRate } from '#lib/utils/metrics-calculator';
 
 	interface Props {
 		isOpen?: boolean;
@@ -61,9 +62,17 @@
 			: []
 	);
 
-	const openRate = $derived(
-		summary && summary.delivered > 0 ? (summary.opened / summary.delivered) * 100 : 0
+	/**
+	 * [MED-03] The three engagement rates are computed by the shared calculator so
+	 * the panel cannot label one metric with another metric's formula:
+	 * open rate = opens / delivered, click-through (CTR) = clicks / delivered,
+	 * click-to-open (CTOR) = clicks / opens.
+	 */
+	const openRate = $derived(summary ? calculateOpenRate(summary.opened, summary.delivered) : 0);
+	const clickThroughRate = $derived(
+		summary ? calculateClickThroughRate(summary.clicked, summary.delivered) : 0
 	);
+	const clickToOpenRate = $derived(summary ? calculateClickToOpenRate(summary.clicked, summary.opened) : 0);
 </script>
 
 <Modal
@@ -118,9 +127,8 @@
 							{summary.cancelled ? 'Distribution halted' : 'Distribution complete'}
 						</Badge>
 						<span class="text-xs font-mono text-stone-600 tabular-nums">
-							Open rate {(summary.delivered > 0 ? openRate.toFixed(1) : '0.0')}% · Click-through {(
-								summary.opened > 0 ? ((summary.clicked / summary.opened) * 100).toFixed(1) : '0.0'
-							)}%
+							Open rate {openRate.toFixed(1)}% · Click-through {clickThroughRate.toFixed(1)}% ·
+							Click-to-open {clickToOpenRate.toFixed(1)}%
 						</span>
 					</div>
 

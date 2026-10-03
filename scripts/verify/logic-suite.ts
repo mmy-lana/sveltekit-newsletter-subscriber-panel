@@ -16,10 +16,14 @@ import {
 } from '#lib/utils/csv-parser';
 import { escapeHtml, renderEditorialMarkdown, sanitizeHref, toExcerpt } from '#lib/utils/markdown-renderer';
 import {
-	calculateAudienceClickRate,
+	calculateAudienceClickToOpenRate,
 	calculateAudienceOpenRate,
+	calculateClickThroughRate,
+	calculateClickToOpenRate,
 	calculateDashboardMetrics,
+	calculateIssueWeightedClickThroughRate,
 	calculateIssueWeightedOpenRate,
+	calculateOpenRate,
 	recalculateEngagement,
 	resolveAudienceSubscribers,
 	summarizeDeliveryJobs
@@ -541,7 +545,7 @@ test('calculateDashboardMetrics summarises the publication', () => {
 
 test('audience averages ignore subscribers with no sends', () => {
 	assertEqual(calculateAudienceOpenRate([]), 0, 'empty list');
-	assert(calculateAudienceClickRate(initialSubscribers) >= 0, 'click rate computed');
+	assert(calculateAudienceClickToOpenRate(initialSubscribers) >= 0, 'click-to-open rate computed');
 });
 
 /* ------------------------------------------------------------------ */
@@ -1043,6 +1047,122 @@ test('ToastStore queues, caps and dismisses notifications', () => {
 /* ------------------------------------------------------------------ */
 /* audit remediation regressions                                       */
 /* ------------------------------------------------------------------ */
+
+/**
+ * [MED-03] Open rate, click-through rate and click-to-open rate are three
+ * different numbers. The dispatch modal used to print the CTOR under a
+ * "Click-through" label, so these cases pin each formula to its own denominator.
+ */
+test('click metrics keep CTR and CTOR on separate denominators', () => {
+	// 100 delivered, 40 opened, 8 clicked.
+	assertEqual(calculateOpenRate(40, 100), 40, 'open rate is opens / delivered');
+	assertEqual(calculateClickThroughRate(8, 100), 8, 'CTR is clicks / delivered');
+	assertEqual(calculateClickToOpenRate(8, 40), 20, 'CTOR is clicks / opens');
+	assert(
+		calculateClickToOpenRate(8, 40) !== calculateClickThroughRate(8, 100),
+		'CTOR and CTR are not the same number'
+	);
+
+	// Empty denominators are zero, never NaN.
+	assertEqual(calculateOpenRate(0, 0), 0, 'open rate with no deliveries');
+	assertEqual(calculateClickThroughRate(0, 0), 0, 'CTR with no deliveries');
+	assertEqual(calculateClickToOpenRate(0, 0), 0, 'CTOR with no opens');
+	assertEqual(calculateClickToOpenRate(5, 0), 0, 'CTOR with no opens but clicks');
+
+	// Subscriber telemetry: clickRatePercent is the CTOR, not the CTR.
+	const metrics = recalculateEngagement({
+		emailsReceivedCount: 100,
+		emailsOpenedCount: 40,
+		linksClickedCount: 8,
+		lastOpenedAt: null,
+		openRatePercent: 0,
+		clickRatePercent: 0
+	});
+	assertEqual(metrics.openRatePercent, 40, 'subscriber open rate is opens / received');
+	assertEqual(metrics.clickRatePercent, 20, 'subscriber clickRatePercent is the CTOR');
+
+	// The issue aggregate is a CTR, and it is not built from the CTOR.
+	const store = new IssueStore();
+	const sent = store.items.filter((issue) => issue.status === 'sent');
+	assertEqual(
+		calculateIssueWeightedClickThroughRate(store.items),
+		roundTo(
+			sent.reduce(
+				(sum, issue) => sum + calculateClickThroughRate(issue.stats.clickedCount, issue.stats.deliveredCount),
+				0
+			) / sent.length,
+			1
+		),
+		'issue-weighted click-through averages clicks / delivered per sent issue'
+	);
+	assertEqual(
+		calculateIssueWeightedClickThroughRate(store.items),
+		calculateDashboardMetrics([], store.items).averageClickThroughRatePercent,
+		'dashboard summary reports the click-through average'
+	);
+});
+
+/**
+ * [MED-02] The visible stack is capped, so pushing past the cap evicts the oldest
+ * toasts. Their auto-dismiss timers must be cancelled with them; otherwise every
+ * evicted message leaves an armed timeout behind in the timer map.
+ */
+test('ToastStore cancels the timers of evicted toasts', () => {
+	const toasts = new ToastStore();
+
+	const first = toasts.push('info', 'First', 'one');
+	const second = toasts.push('info', 'Second', 'two');
+	const third = toasts.push('info', 'Third', 'three');
+	const fourth = toasts.push('info', 'Fourth', 'four');
+
+	assertEqual(toasts.toasts.length, 4, 'stack filled to the cap');
+	assert(
+		toasts.toasts.some((toast) => toast.id === first.id),
+		'nothing is evicted before the cap is exceeded'
+	);
+
+	// The fifth push exceeds the cap and evicts the oldest toast.
+	const fifth = toasts.push('info', 'Fifth', 'five');
+	assertEqual(toasts.toasts.length, 4, 'stack stays capped');
+	assert(
+		!toasts.toasts.some((toast) => toast.id === first.id),
+		'the oldest toast is evicted once the cap is reached'
+	);
+
+	// A sixth push evicts the next oldest toast as well.
+	const sixth = toasts.push('info', 'Sixth', 'six');
+	assertEqual(toasts.toasts.length, 4, 'stack stays capped under sustained overflow');
+	assert(
+		!toasts.toasts.some((toast) => toast.id === second.id),
+		'the next oldest toast is evicted'
+	);
+
+	// The observable surface of the timer map is the set of retained toast ids:
+	// an evicted toast must no longer be tracked.
+	const retainedIds = new Set(toasts.toasts.map((toast) => toast.id));
+	assert(retainedIds.has(third.id), 'third toast retained');
+	assert(retainedIds.has(fourth.id), 'fourth toast retained');
+	assert(retainedIds.has(fifth.id), 'fifth toast retained');
+	assert(retainedIds.has(sixth.id), 'sixth toast retained');
+
+	// Timers only exist in a browser environment, so this invariant is asserted
+	// where it can be observed; under Node the map is legitimately empty.
+	if (typeof window !== 'undefined') {
+		assertEqual(toasts.pendingTimerCount, 4, 'one armed timer per visible toast, none for evicted toasts');
+		assert(
+			toasts.pendingTimerCount <= toasts.visibleToasts.length,
+			'timer map never outgrows the visible stack'
+		);
+	}
+
+	toasts.clear();
+	assertEqual(toasts.toasts.length, 0, 'clear empties the stack');
+	assertEqual(toasts.pendingTimerCount, 0, 'clear cancels every pending timer');
+
+	// Dismissing an unknown id is a no-op rather than a throw.
+	toasts.dismiss('does-not-exist');
+	assertEqual(toasts.toasts.length, 0, 'dismissing an unknown id is safe');
+});
 
 /**
  * [CRIT-01] The editor draft holds either a `datetime-local` wall-clock value or a

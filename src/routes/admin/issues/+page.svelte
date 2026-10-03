@@ -15,7 +15,7 @@
 	import { getToastState } from '#lib/state/toast.svelte';
 	import { getSettingsState } from '#lib/state/settings.svelte';
 	import { formatDate, formatPercentFixed } from '#lib/utils/format';
-	import { resolveAudienceSubscribers } from '#lib/utils/metrics-calculator';
+	import { calculateClickThroughRate, calculateOpenRate, resolveAudienceSubscribers } from '#lib/utils/metrics-calculator';
 
 	const issueStore = getIssueState();
 	const subscriberStore = getSubscriberState();
@@ -272,9 +272,10 @@
 												{item.stats.openedCount} · Clicks {item.stats.clickedCount} · Bounces
 												{item.stats.bouncedCount} · Open rate
 												{formatPercentFixed(
-													item.stats.deliveredCount > 0
-														? (item.stats.openedCount / item.stats.deliveredCount) * 100
-														: 0
+													calculateOpenRate(item.stats.openedCount, item.stats.deliveredCount)
+												)} · Click-through
+												{formatPercentFixed(
+													calculateClickThroughRate(item.stats.clickedCount, item.stats.deliveredCount)
 												)}
 											</p>
 										{/if}
