@@ -21,6 +21,26 @@ import Skeleton from '#lib/components/ui/Skeleton.svelte';
 import Textarea from '#lib/components/ui/Textarea.svelte';
 import Toast from '#lib/components/ui/Toast.svelte';
 
+// Phase 3 — compound domain components (presentational variants only; the
+// AdminSidebar reads `$app/state`, so it is covered by the E2E suite instead).
+import ArchiveIssueCard from '#lib/components/editorial/ArchiveIssueCard.svelte';
+import ArticleHeader from '#lib/components/editorial/ArticleHeader.svelte';
+import ArticleRenderer from '#lib/components/editorial/ArticleRenderer.svelte';
+import Byline from '#lib/components/editorial/Byline.svelte';
+import PublicNavigation from '#lib/components/editorial/PublicNavigation.svelte';
+import SubscribeCard from '#lib/components/editorial/SubscribeCard.svelte';
+import CsvImportModal from '#lib/components/panel/CsvImportModal.svelte';
+import DeliveryProgressBar from '#lib/components/panel/DeliveryProgressBar.svelte';
+import IssueDeliveryQueueModal from '#lib/components/panel/IssueDeliveryQueueModal.svelte';
+import IssueEditor from '#lib/components/panel/IssueEditor.svelte';
+import IssuePreviewPane from '#lib/components/panel/IssuePreviewPane.svelte';
+import MetricCard from '#lib/components/panel/MetricCard.svelte';
+import SubscriberFilterBar from '#lib/components/panel/SubscriberFilterBar.svelte';
+import SubscriberModal from '#lib/components/panel/SubscriberModal.svelte';
+import SubscriberTable from '#lib/components/panel/SubscriberTable.svelte';
+import { initialIssues, initialSubscribers } from '#lib/storage/seed-data';
+import type { Subscriber } from '#lib/types/newsletter';
+
 export interface SuiteResult {
 	passed: number;
 	failed: number;
@@ -169,6 +189,234 @@ const toastStack = render(Toast, {
 		],
 		ondismiss: () => {}
 	}
+}).body;
+
+/* ------------------------------------------------------------------ */
+/* Phase 3 — compound domain components                                 */
+/* ------------------------------------------------------------------ */
+
+const noop = (): void => {};
+
+const sampleSubscriber = initialSubscribers[0] as Subscriber;
+const sampleIssue = initialIssues[0];
+
+const metricCard = render(MetricCard, {
+	props: {
+		title: 'Active Audience',
+		value: '10',
+		subtitle: 'Total active subscribers',
+		trend: { direction: 'up', label: '+2 this month' }
+	}
+}).body;
+
+const subscriberTableDesktop = render(SubscriberTable, {
+	props: {
+		// Deliberately mixes a reader with telemetry and one that never opened an issue.
+		subscribers: [initialSubscribers[0], initialSubscribers[8], initialSubscribers[4]],
+		selectedIds: [initialSubscribers[0].id],
+		sortBy: 'openRatePercent',
+		sortDirection: 'desc',
+		ontoggleSelect: noop,
+		ontoggleselectall: noop,
+		onsortchange: noop,
+		onedit: noop,
+		ondelete: noop
+	}
+}).body;
+
+const subscriberTableEmpty = render(SubscriberTable, {
+	props: {
+		subscribers: [],
+		selectedIds: [],
+		emptyMessage: 'No subscribers match the current filters.',
+		ontoggleSelect: noop,
+		onedit: noop,
+		ondelete: noop
+	}
+}).body;
+
+const subscriberTableLoading = render(SubscriberTable, {
+	props: { subscribers: [], selectedIds: [], isLoading: true, ontoggleSelect: noop, onedit: noop, ondelete: noop }
+}).body;
+
+const filterBar = render(SubscriberFilterBar, {
+	props: {
+		filters: {
+			searchQuery: 'sarah',
+			status: 'active',
+			tier: 'all',
+			tag: 'all',
+			sortBy: 'subscribedAt',
+			sortDirection: 'desc',
+			page: 1,
+			pageSize: 10
+		},
+		availableTags: ['architect', 'systems'],
+		resultCount: 3,
+		selectedCount: 2,
+		onfilterchange: noop,
+		onbulkstatus: noop,
+		onbulkdelete: noop,
+		onclearselection: noop
+	}
+}).body;
+
+const subscriberModalCreate = render(SubscriberModal, {
+	props: { isOpen: true, subscriber: null, existingEmails: [], onsave: noop, onclose: noop }
+}).body;
+
+const subscriberModalEdit = render(SubscriberModal, {
+	props: {
+		isOpen: true,
+		subscriber: sampleSubscriber,
+		existingEmails: [sampleSubscriber.email],
+		onsave: noop,
+		onclose: noop
+	}
+}).body;
+
+const csvImportModal = render(CsvImportModal, {
+	props: {
+		isOpen: true,
+		existingEmails: ['taken@example.com'],
+		result: {
+			totalRows: 3,
+			successfulImports: 2,
+			failedImports: 1,
+			errors: [{ row: 4, email: 'taken@example.com', reason: 'Already subscribed to this publication.' }]
+		},
+		onimport: noop,
+		onreset: noop,
+		onclose: noop
+	}
+}).body;
+
+const progressBar = render(DeliveryProgressBar, {
+	props: { percent: 42.7, processed: 42, total: 100 }
+}).body;
+
+const progressBarPaused = render(DeliveryProgressBar, {
+	props: { percent: 42.7, processed: 42, total: 100, isPaused: true }
+}).body;
+
+const dispatchModalIdle = render(IssueDeliveryQueueModal, {
+	props: {
+		isOpen: true,
+		issue: sampleIssue,
+		targetRecipients: 10,
+		excludedRecipients: 4,
+		status: 'idle',
+		progressPercent: 0,
+		processedCount: 0,
+		totalQueueCount: 0,
+		ondispatch: noop,
+		onpause: noop,
+		onresume: noop,
+		onhalt: noop,
+		oncomplete: noop,
+		onclose: noop
+	}
+}).body;
+
+const dispatchModalRunning = render(IssueDeliveryQueueModal, {
+	props: {
+		isOpen: true,
+		issue: sampleIssue,
+		targetRecipients: 10,
+		status: 'running',
+		progressPercent: 30,
+		processedCount: 3,
+		totalQueueCount: 10,
+		ondispatch: noop,
+		onpause: noop,
+		onresume: noop,
+		onhalt: noop,
+		oncomplete: noop,
+		onclose: noop
+	}
+}).body;
+
+const dispatchModalEmpty = render(IssueDeliveryQueueModal, {
+	props: {
+		isOpen: true,
+		issue: sampleIssue,
+		targetRecipients: 0,
+		status: 'idle',
+		progressPercent: 0,
+		processedCount: 0,
+		totalQueueCount: 0,
+		ondispatch: noop,
+		onpause: noop,
+		onresume: noop,
+		onhalt: noop,
+		oncomplete: noop,
+		onclose: noop
+	}
+}).body;
+
+const dispatchModalFinished = render(IssueDeliveryQueueModal, {
+	props: {
+		isOpen: true,
+		issue: sampleIssue,
+		targetRecipients: 10,
+		status: 'finished',
+		progressPercent: 100,
+		processedCount: 10,
+		totalQueueCount: 10,
+		summary: { delivered: 9, bounced: 1, opened: 5, clicked: 2, cancelled: true },
+		ondispatch: noop,
+		onpause: noop,
+		onresume: noop,
+		onhalt: noop,
+		oncomplete: noop,
+		onclose: noop
+	}
+}).body;
+
+const issueEditor = render(IssueEditor, {
+	props: {
+		issue: sampleIssue,
+		isDirty: true,
+		savedAt: '2026-10-05T12:00:00Z',
+		onchange: noop,
+		onsave: noop,
+		ondelete: noop
+	}
+}).body;
+
+const previewPane = render(IssuePreviewPane, { props: { issue: sampleIssue } }).body;
+
+const publicNavigation = render(PublicNavigation, {
+	props: { publicationName: 'The Margins & Letters', isArchiveActive: true }
+}).body;
+
+const byline = render(Byline, {
+	props: {
+		authorName: 'Julian Sterling',
+		publishedAt: '2026-09-20T10:00:00Z',
+		readingMinutes: 6,
+		issueNumber: 12
+	}
+}).body;
+
+const articleHeader = render(ArticleHeader, {
+	props: { issue: sampleIssue, readingMinutes: 6, issueNumber: 12 }
+}).body;
+
+const articleRenderer = render(ArticleRenderer, {
+	props: { contentMarkdown: sampleIssue.contentMarkdown }
+}).body;
+
+const articleRendererHostile = render(ArticleRenderer, {
+	props: { contentMarkdown: '<script>alert(1)</script>\n\n[x](javascript:alert(1))' }
+}).body;
+
+const archiveCard = render(ArchiveIssueCard, {
+	props: { issue: sampleIssue, issueNumber: 12 }
+}).body;
+
+const subscribeCard = render(SubscribeCard, {
+	props: { publicationName: 'The Margins & Letters', supportEmail: 'editor@themargins.example', onsubscribe: noop }
 }).body;
 
 /* ------------------------------------------------------------------ */
@@ -339,6 +587,245 @@ const cases: Case[] = [
 			mustInclude(html, 'aria-label="Dismiss notification"', 'dismiss control');
 			mustInclude(html, 'Subscriber saved', 'toast title');
 		}
+	},
+
+	/* ---------------------------- Phase 3 ---------------------------- */
+
+	{
+		name: 'MetricCard renders telemetry with trend and subtitle',
+		html: metricCard,
+		assert: (html) => {
+			mustInclude(html, 'Active Audience', 'card title');
+			mustInclude(html, 'tabular-nums', 'tabular numerals');
+			mustInclude(html, '+2 this month', 'trend label');
+			mustInclude(html, 'Total active subscribers', 'subtitle');
+		}
+	},
+	{
+		name: 'SubscriberTable renders both mobile cards and a dense desktop grid',
+		html: subscriberTableDesktop,
+		assert: (html) => {
+			mustInclude(html, 'sm:hidden', 'mobile card branch');
+			mustInclude(html, 'hidden sm:block', 'desktop table branch');
+			mustInclude(html, 'aria-sort="descending"', 'sorted column state');
+			mustInclude(html, 'aria-checked="mixed"', 'indeterminate select-all state');
+			mustInclude(html, 'Select all subscribers on this page', 'select-all control');
+			mustInclude(html, initialSubscribers[0].email, 'subscriber email rendered');
+			mustInclude(html, 'Select all', 'header checkbox label');
+			mustInclude(html, 'Never opened', 'empty telemetry fallback');
+		}
+	},
+	{
+		name: 'SubscriberTable renders a distinct empty state',
+		html: subscriberTableEmpty,
+		assert: (html) => {
+			mustInclude(html, 'No subscribers match the current filters.', 'empty message');
+			mustNotInclude(html, '<table', 'no table shell without data');
+		}
+	},
+	{
+		name: 'SubscriberTable announces the loading state',
+		html: subscriberTableLoading,
+		assert: (html) => {
+			mustInclude(html, 'aria-live="polite"', 'polite live region');
+			mustInclude(html, 'Loading subscribers', 'loading copy');
+		}
+	},
+	{
+		name: 'SubscriberFilterBar wires search, filters and bulk actions',
+		html: filterBar,
+		assert: (html) => {
+			mustInclude(html, 'id="subscriber-search"', 'search input');
+			mustInclude(html, 'All statuses', 'status filter option');
+			mustInclude(html, 'All tags', 'tag filter option');
+			mustInclude(html, 'architect', 'tag option from data');
+			mustInclude(html, 'aria-live="polite"', 'result count announcement');
+			mustInclude(html, 'Bulk actions', 'bulk action region');
+			mustInclude(html, '2 selected', 'selection summary');
+			mustInclude(html, 'Mark active', 'bulk status action');
+		}
+	},
+	{
+		name: 'SubscriberModal creates a new record',
+		html: subscriberModalCreate,
+		assert: (html) => {
+			mustInclude(html, 'Add New Subscriber', 'create title');
+			mustInclude(html, 'Add Subscriber', 'create submit label');
+			mustInclude(html, 'type="email"', 'email field type');
+			mustNotInclude(html, 'Engagement', 'no telemetry block when creating');
+		}
+	},
+	{
+		name: 'SubscriberModal pre-fills an existing record with telemetry',
+		html: subscriberModalEdit,
+		assert: (html) => {
+			mustInclude(html, 'Edit Subscriber', 'edit title');
+			mustInclude(html, 'Save Changes', 'edit submit label');
+			mustInclude(html, 'Engagement', 'telemetry block');
+			mustInclude(html, sampleSubscriber.email, 'existing email prefilled');
+			mustInclude(html, 'founding', 'existing tier prefilled');
+		}
+	},
+	{
+		name: 'CsvImportModal renders the importer and its error report',
+		html: csvImportModal,
+		assert: (html) => {
+			mustInclude(html, 'type="file"', 'file picker');
+			mustInclude(html, 'accept=".csv,text/csv"', 'csv accept filter');
+			mustInclude(html, 'Imported 2 of 3 rows', 'summary line');
+			mustInclude(html, 'Already subscribed to this publication.', 'row-level error');
+			mustInclude(html, 'aria-live="polite"', 'import result announcement');
+			mustInclude(html, 'existing subscribers will be checked', 'duplicate guidance');
+		}
+	},
+	{
+		name: 'DeliveryProgressBar exposes progressbar semantics',
+		html: progressBar,
+		assert: (html) => {
+			mustInclude(html, 'role="progressbar"', 'progressbar role');
+			mustInclude(html, 'aria-valuenow="43"', 'rounded percentage');
+			mustInclude(html, 'aria-valuemax="100"', 'upper bound');
+			mustInclude(html, '42 / 100', 'processed counter');
+		}
+	},
+	{
+		name: 'DeliveryProgressBar distinguishes the paused state',
+		html: progressBarPaused,
+		assert: (html) => {
+			mustInclude(html, 'aria-valuetext="Paused"', 'paused announcement');
+			mustInclude(html, 'data-state="paused"', 'paused styling hook');
+			mustInclude(html, 'bg-amber-600', 'paused colour');
+		}
+	},
+	{
+		name: 'Dispatch modal confirms before sending and blocks empty audiences',
+		html: dispatchModalIdle,
+		assert: (html) => {
+			mustInclude(html, 'Confirm &amp; Send', 'confirm action');
+			mustInclude(html, 'All subscribers', 'audience label');
+			mustInclude(html, '10 recipients', 'recipient count');
+			mustInclude(html, '4 excluded', 'excluded count');
+		}
+	},
+	{
+		name: 'Dispatch modal blocks an audience with no eligible recipients',
+		html: dispatchModalEmpty,
+		assert: (html) => {
+			mustInclude(html, 'No eligible recipients', 'empty audience warning');
+			mustInclude(html, 'role="alert"', 'alert semantics');
+			mustInclude(html, 'disabled', 'send button disabled');
+		}
+	},
+	{
+		name: 'Dispatch modal exposes pause and halt while running',
+		html: dispatchModalRunning,
+		assert: (html) => {
+			mustInclude(html, 'Halt Distribution', 'halt action');
+			mustInclude(html, 'Pause', 'pause action');
+			mustNotInclude(html, 'Confirm &amp; Send', 'send action hidden during a run');
+		}
+	},
+	{
+		name: 'Dispatch modal reconciles statistics after a halted run',
+		html: dispatchModalFinished,
+		assert: (html) => {
+			mustInclude(html, 'Distribution halted', 'halted status');
+			mustInclude(html, 'Delivered', 'delivered row');
+			mustInclude(html, 'Simulated opens', 'open row');
+			mustInclude(html, 'Done', 'completion action');
+			mustInclude(html, 'remaining jobs stay queued', 'honest partial-run copy');
+		}
+	},
+	{
+		name: 'IssueEditor exposes every metadata field and dirty state',
+		html: issueEditor,
+		assert: (html) => {
+			mustInclude(html, 'data-state="dirty"', 'dirty indicator');
+			mustInclude(html, 'id="issue-markdown"', 'markdown editor');
+			mustInclude(html, 'Audience', 'audience selector');
+			mustInclude(html, 'All subscribers', 'audience option');
+			mustInclude(html, 'Schedule for', 'scheduler field');
+			mustInclude(html, 'Save Changes', 'save action');
+			mustInclude(html, 'min read', 'reading time estimate');
+		}
+	},
+	{
+		name: 'IssuePreviewPane renders sanitised HTML with delivery stats',
+		html: previewPane,
+		assert: (html) => {
+			mustInclude(html, 'aria-label="Issue preview"', 'labelled region');
+			mustInclude(html, '<h1 class="text-3xl', 'rendered markdown heading');
+			mustInclude(html, 'Open rate', 'delivery stats');
+			mustNotInclude(html, '<script', 'no script markup');
+		}
+	},
+	{
+		name: 'Public navigation marks the active section',
+		html: publicNavigation,
+		assert: (html) => {
+			mustInclude(html, 'The Margins &amp; Letters', 'publication name');
+			mustInclude(html, 'aria-current="page"', 'active link');
+			mustInclude(html, 'aria-label="Publication"', 'navigation label');
+			mustInclude(html, 'href="/admin"', 'publisher link');
+		}
+	},
+	{
+		name: 'Byline renders dateline, issue number and initials fallback',
+		html: byline,
+		assert: (html) => {
+			mustInclude(html, 'Julian Sterling', 'author name');
+			mustInclude(html, 'JS', 'initials fallback');
+			mustInclude(html, 'No. 12', 'issue serial');
+			mustInclude(html, '6 min read', 'reading time');
+			mustInclude(html, '<time', 'machine readable dateline');
+		}
+	},
+	{
+		name: 'ArticleHeader composes tags, headline and byline',
+		html: articleHeader,
+		assert: (html) => {
+			mustInclude(html, sampleIssue.title, 'headline');
+			mustInclude(html, 'architecture', 'tag pill');
+			mustInclude(html, 'Julian Sterling', 'byline');
+		}
+	},
+	{
+		name: 'ArticleRenderer renders markdown into the editorial body',
+		html: articleRenderer,
+		assert: (html) => {
+			mustInclude(html, 'editorial-body', 'editorial typography hook');
+			mustInclude(html, '<h1', 'rendered heading');
+			mustInclude(html, '<blockquote', 'rendered quote');
+			mustInclude(html, '<li', 'rendered list');
+		}
+	},
+	{
+		name: 'ArticleRenderer neutralises hostile markdown',
+		html: articleRendererHostile,
+		assert: (html) => {
+			mustNotInclude(html, '<script', 'script tags stripped');
+			mustNotInclude(html, 'javascript:', 'javascript scheme stripped');
+			mustInclude(html, '#blocked-uri', 'blocked href sentinel');
+		}
+	},
+	{
+		name: 'ArchiveIssueCard links to the public article route',
+		html: archiveCard,
+		assert: (html) => {
+			mustInclude(html, `href="/p/${sampleIssue.slug}"`, 'article link');
+			mustInclude(html, 'Read dispatch', 'read call to action');
+			mustInclude(html, 'No. 12', 'serial number');
+		}
+	},
+	{
+		name: 'SubscribeCard renders an accessible subscription form',
+		html: subscribeCard,
+		assert: (html) => {
+			mustInclude(html, 'subscribe-heading', 'labelled section');
+			mustInclude(html, 'id="subscribe-email"', 'email field');
+			mustInclude(html, 'type="submit"', 'submit control');
+			mustInclude(html, 'editor@themargins.example', 'support contact');
+		}
 	}
 ];
 
@@ -370,7 +857,25 @@ export function runComponentSuite(): SuiteResult {
 			},
 			{ title: 'Feedback', html: skeletonText + skeletonCircle + toastStack },
 			{ title: 'Pagination', html: paginationMiddle },
-			{ title: 'Modal', html: modalOpen }
+			{ title: 'Modal', html: modalOpen },
+			{ title: 'Metrics', html: metricCard },
+			{ title: 'Subscriber table', html: subscriberTableDesktop },
+			{
+				title: 'Subscriber table (empty)',
+				html: subscriberTableEmpty + subscriberTableLoading
+			},
+			{ title: 'Filter bar', html: filterBar },
+			{ title: 'Subscriber modal', html: subscriberModalEdit },
+			{ title: 'CSV import modal', html: csvImportModal },
+			{ title: 'Delivery progress', html: progressBar + progressBarPaused },
+			{ title: 'Dispatch modal', html: dispatchModalIdle },
+			{ title: 'Issue editor', html: issueEditor },
+			{ title: 'Issue preview', html: previewPane },
+			{ title: 'Editorial navigation', html: publicNavigation },
+			{ title: 'Article header', html: articleHeader },
+			{ title: 'Article body', html: articleRenderer },
+			{ title: 'Archive card', html: archiveCard },
+			{ title: 'Subscribe card', html: subscribeCard }
 		]
 	};
 }

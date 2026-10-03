@@ -37,8 +37,10 @@
 	const baseStyles =
 		'inline-flex items-center justify-center font-medium transition-colors select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-stone-900 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation cursor-pointer';
 
+	// `sm` keeps the compact admin-table height from the design system on pointer
+	// devices, but grows to the 44px touch guideline below the sm breakpoint.
 	const sizeStyles: Record<ButtonSize, string> = {
-		sm: 'text-xs px-2.5 py-1.5 min-h-[36px] rounded',
+		sm: 'text-xs px-2.5 py-1.5 min-h-[44px] sm:min-h-[36px] rounded',
 		md: 'text-sm px-4 py-2 min-h-[44px] rounded-md',
 		lg: 'text-base px-6 py-3 min-h-[48px] rounded-md font-semibold'
 	};

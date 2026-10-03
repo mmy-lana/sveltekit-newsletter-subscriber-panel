@@ -24,6 +24,7 @@
 		step?: string | number;
 		class?: string;
 		oninput?: (event: Event & { currentTarget: HTMLInputElement }) => void;
+		onblur?: (event: FocusEvent & { currentTarget: HTMLInputElement }) => void;
 		onkeydown?: (event: KeyboardEvent) => void;
 	}
 
@@ -49,6 +50,7 @@
 		step,
 		class: customClass = '',
 		oninput,
+		onblur,
 		onkeydown
 	}: InputProps = $props();
 
@@ -100,6 +102,7 @@
 		aria-describedby={describedBy}
 		aria-required={required ? 'true' : undefined}
 		{oninput}
+		{onblur}
 		{onkeydown}
 		class="{baseControlStyles} {stateStyles}"
 	/>

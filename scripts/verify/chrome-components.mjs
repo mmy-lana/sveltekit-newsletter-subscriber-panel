@@ -67,36 +67,44 @@ try {
 			`${viewport.name}: primary button should use the stone-900 token (got ${theme.buttonBackground})`
 		);
 
-		// 2. Touch targets meet the 44px guideline.
-		const undersized = await page.evaluate(() => {
+		// 2. Touch targets: 44px below the sm breakpoint, 32px on pointer devices.
+		const undersized = await page.evaluate((minimumHeight) => {
 			const problems = [];
-			const selectors = [
-				'button',
-				'input',
-				'select',
-				'textarea',
-				'[role="option"]'
-			];
+			const selectors = ['button', 'input', 'select', 'textarea', 'a[href]', '[role="option"]'];
+
+			const describe = (element) =>
+				`${element.tagName.toLowerCase()} "${(element.textContent ?? element.getAttribute('aria-label') ?? '').trim().slice(0, 24)}"`;
 
 			for (const selector of selectors) {
 				for (const element of document.querySelectorAll(selector)) {
 					const rect = element.getBoundingClientRect();
-					if (rect.width === 0 || rect.height === 0) continue;
-					// The primary button in the gallery is the plain default size.
-					if (element.getAttribute('aria-label') === 'Sending') continue;
-					if (rect.height < 44) {
-						problems.push(
-							`${selector} "${(element.textContent ?? element.getAttribute('aria-label') ?? '').trim().slice(0, 24)}" height ${Math.round(rect.height)}px`
-						);
+					const style = getComputedStyle(element);
+
+					// Visually hidden controls (sr-only file inputs, decorative nodes)
+					// are activated through a visible sibling and are not hit targets.
+					if (rect.width < 2 || rect.height < 2) continue;
+					if (style.visibility === 'hidden' || style.display === 'none') continue;
+					if (style.clipPath === 'inset(50%)' || style.clip === 'rect(0px, 0px, 0px, 0px)') continue;
+					if (element.type === 'file') continue;
+
+					// A checkbox/radio inherits the hit box of the label wrapping it.
+					if (element.type === 'checkbox' || element.type === 'radio') {
+						const label = element.closest('label');
+						const labelRect = label?.getBoundingClientRect();
+						if (labelRect && labelRect.height >= 44 && labelRect.width >= 44) continue;
+					}
+
+					if (rect.height < minimumHeight) {
+						problems.push(`${describe(element)} height ${Math.round(rect.height)}px`);
 					}
 				}
 			}
 			return problems;
-		});
+		}, viewport.width < 640 ? 44 : 32);
 
 		check(
 			undersized.length === 0,
-			`${viewport.name}: touch targets below 44px — ${undersized.join(', ')}`
+			`${viewport.name}: touch targets below ${viewport.width < 640 ? 44 : 32}px — ${undersized.join(', ')}`
 		);
 
 		// 3. Nothing overflows horizontally.
