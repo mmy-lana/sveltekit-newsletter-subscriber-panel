@@ -327,7 +327,7 @@ trap, backdrop and Escape dismissal come from Modal. -->
 <ConfirmDialog
 	isOpen={deleteTarget !== null}
 	title="Delete subscriber?"
-	description="This removes the reader and their engagement history."
+	description="This action cannot be undone."
 	confirmLabel="Delete subscriber"
 	onconfirm={handleDelete}
 	oncancel={() => (deleteTarget = null)}
@@ -337,7 +337,6 @@ trap, backdrop and Escape dismissal come from Modal. -->
 			<strong class="break-all">{deleteTarget.email}</strong> will be removed from the audience along
 			with its engagement history.
 		</p>
-		<p class="text-xs text-stone-500">This action cannot be undone.</p>
 	{/if}
 </ConfirmDialog>
 
