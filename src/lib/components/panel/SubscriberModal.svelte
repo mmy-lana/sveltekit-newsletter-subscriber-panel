@@ -89,11 +89,20 @@
 		isTouched = false;
 	});
 
+	/**
+	 * [MED-04] Duplicate detection is case-insensitive on both sides.
+	 *
+	 * The previous filter compared the stored address against the record being edited
+	 * verbatim, so an editor whose address differed only in case was treated as a
+	 * collision with itself and the form refused to save its own record. Both the
+	 * exclusion and the lookup now go through `normalizeEmail`, which also matches
+	 * the identity rule enforced by the store on write.
+	 */
 	const duplicateEmail = $derived(
 		existingEmails
-			.filter((existing) => existing !== subscriber?.email)
-			.map((existing) => existing.toLowerCase())
-			.includes(form.email.trim().toLowerCase())
+			.map((existing) => normalizeEmail(existing))
+			.filter((existing) => existing !== normalizeEmail(subscriber?.email ?? ''))
+			.includes(normalizeEmail(form.email))
 	);
 
 	function validate(): boolean {

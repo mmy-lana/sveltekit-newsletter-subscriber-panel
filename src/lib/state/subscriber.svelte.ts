@@ -107,8 +107,13 @@ export class SubscriberStore {
 	);
 	bouncedCount = $derived(this.items.filter((subscriber) => subscriber.status === 'bounced').length);
 
-	/** Emails in the audience, lower-cased — the source for duplicate detection. */
-	existingEmails = $derived(this.items.map((subscriber) => subscriber.email));
+	/**
+	 * Normalised emails in the audience — the source for duplicate detection.
+	 *
+	 * [HIGH-01] Values are compared case-insensitively everywhere: a legacy record
+	 * written before normalisation must still collide with its normalised twin.
+	 */
+	existingEmails = $derived(this.items.map((subscriber) => normalizeEmail(subscriber.email)));
 
 	getById(id: string): Subscriber | undefined {
 		return this.items.find((subscriber) => subscriber.id === id);
@@ -116,7 +121,7 @@ export class SubscriberStore {
 
 	getByEmail(email: string): Subscriber | undefined {
 		const needle = normalizeEmail(email);
-		return this.items.find((subscriber) => subscriber.email === needle);
+		return this.items.find((subscriber) => normalizeEmail(subscriber.email) === needle);
 	}
 
 	setFilter<K extends keyof SubscriberFilterOptions>(key: K, value: SubscriberFilterOptions[K]): void {

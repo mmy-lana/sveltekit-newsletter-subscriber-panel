@@ -177,10 +177,13 @@ export class IssueStore {
 
 			const merged: NewsletterIssue = { ...issue, ...updates, updatedAt: now };
 
-			// HTML is always re-derived from the markdown source of truth.
-			if (updates.contentMarkdown !== undefined) {
-				merged.contentHtml = renderEditorialMarkdown(merged.contentMarkdown);
-			}
+			// [LOW-01] HTML is never accepted from the caller: it is unconditionally
+			// re-derived from the merged markdown through the sanitising renderer.
+			// Previously the re-render only ran when the patch carried a
+			// `contentMarkdown` key, so a caller could persist a hand-written
+			// `contentHtml` (or leave stale HTML beside new markdown) and inject
+			// unsanitised markup into the public article page.
+			merged.contentHtml = renderEditorialMarkdown(merged.contentMarkdown);
 
 			// Keep the excerpt useful when the author never wrote one.
 			if (updates.excerpt === '' && updates.contentMarkdown !== undefined) {

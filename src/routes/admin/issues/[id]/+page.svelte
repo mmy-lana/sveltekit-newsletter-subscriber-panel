@@ -13,6 +13,7 @@
 	import { getToastState } from '#lib/state/toast.svelte';
 	import { getSettingsState } from '#lib/state/settings.svelte';
 	import type { IssueEditorDraft } from '#lib/components/panel/IssueEditor.svelte';
+	import { fromDateTimeLocalValue } from '#lib/utils/format';
 	import { isNonEmpty } from '#lib/utils/validators';
 
 	const issueStore = getIssueState();
@@ -40,10 +41,22 @@
 	let savedAt = $state<string | null>(null);
 	let isSaving = $state(false);
 
+	/**
+	 * [CRIT-01] Canonical timestamp for the draft schedule.
+	 *
+	 * The draft field holds two shapes — the wall-clock value emitted by
+	 * `<input type="datetime-local">` and the ISO timestamp already stored on the
+	 * issue — so every consumer normalises it through `fromDateTimeLocalValue()`
+	 * before comparing or rendering it. Interpolating `:00Z` onto an ISO value
+	 * produced an Invalid Date, and `toISOString()` then threw `RangeError`.
+	 */
+	const draftScheduledAt = $derived(draft ? fromDateTimeLocalValue(draft.scheduledAt ?? '') : null);
+
 	/** Stored issue with the unsaved draft layered on top, for the live preview. */
 	const previewIssue = $derived.by<NewsletterIssue | null>(() => {
 		if (!issue) return null;
-		return draft ? { ...issue, ...draft } : issue;
+		if (!draft) return issue;
+		return { ...issue, ...draft, scheduledAt: draftScheduledAt };
 	});
 
 	const validationError = $derived(
@@ -60,7 +73,8 @@
 			draft.audience !== issue.audience ||
 			draft.authorName !== issue.authorName ||
 			draft.coverImageUrl !== (issue.coverImageUrl ?? '') ||
-			(draft.scheduledAt ?? '') !== (issue.scheduledAt ?? '') ||
+			// Compared canonically so a draft that has just been saved reads as clean.
+			draftScheduledAt !== (issue.scheduledAt ?? null) ||
 			draft.tags.join(',') !== issue.tags.join(',')
 		);
 	});
@@ -97,14 +111,35 @@
 	function handleSave(): void {
 		if (!issue || !draft || validationError) return;
 
+		// [CRIT-01] `draftScheduledAt` is null for an empty field (schedule removed)
+		// and for an incomplete one. Only the second case is an error.
+		if (draft.scheduledAt && draftScheduledAt === null) {
+			toastStore.error(
+				'Invalid schedule',
+				'Enter a complete date and time before saving, or clear the field to remove the schedule.'
+			);
+			return;
+		}
+
 		isSaving = true;
 		issueStore.updateIssue(issue.id, {
 			...draft,
 			coverImageUrl: draft.coverImageUrl === '' ? null : draft.coverImageUrl,
-			scheduledAt: draft.scheduledAt ? new Date(`${draft.scheduledAt}:00Z`).toISOString() : null
+			scheduledAt: draftScheduledAt
 		});
-		savedAt = new Date().toISOString();
 		isSaving = false;
+
+		// [CRIT-02] The store reports a rejected write (quota exhausted, private mode)
+		// through `persistenceError`. Claiming success — and stamping `savedAt` — while
+		// the record only exists in memory would tell the operator their work is safe
+		// when it is about to be lost.
+		const failure = issueStore.persistenceError;
+		if (failure) {
+			toastStore.error('Issue not saved', failure);
+			return;
+		}
+
+		savedAt = new Date().toISOString();
 		toastStore.success('Issue saved', issue.title);
 	}
 

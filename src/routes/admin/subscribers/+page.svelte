@@ -12,6 +12,7 @@
 	import { getToastState } from '#lib/state/toast.svelte';
 	import { parseSubscribersCsv } from '#lib/utils/csv-parser';
 	import { getSettingsState } from '#lib/state/settings.svelte';
+	import { normalizeEmail } from '#lib/utils/validators';
 
 	const subscriberStore = getSubscriberState();
 	const toastStore = getToastState();
@@ -68,8 +69,14 @@
 		if (draft.id) {
 			// An edit must not collide with a different record: the email is the
 			// identity used for delivery and suppression.
+			// [HIGH-01] Comparison is case-insensitive. A case-sensitive check let an
+			// operator save `Alex.Chen@CloudDev.io` against an existing
+			// `alex.chen@clouddev.io`, creating two records for one mailbox — so every
+			// provider would receive the dispatch twice.
+			const candidate = normalizeEmail(draft.email);
 			const collision = subscriberStore.items.find(
-				(subscriber) => subscriber.id !== draft.id && subscriber.email === draft.email
+				(subscriber) =>
+					subscriber.id !== draft.id && normalizeEmail(subscriber.email) === candidate
 			);
 
 			if (collision) {

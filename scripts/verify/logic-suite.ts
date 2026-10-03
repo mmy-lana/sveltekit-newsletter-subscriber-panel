@@ -1041,6 +1041,146 @@ test('ToastStore queues, caps and dismisses notifications', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* audit remediation regressions                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * [CRIT-01] The editor draft holds either a `datetime-local` wall-clock value or a
+ * value that is already an ISO timestamp. Appending ":00Z" to the latter produced an
+ * Invalid Date, and the save handler then threw `RangeError: Invalid time value`.
+ * These cases pin the parser to "never throws, never yields an Invalid Date".
+ */
+test('fromDateTimeLocalValue accepts every schedule shape without throwing', () => {
+	// Wall-clock values are read as UTC, matching toDateTimeLocalValue.
+	assertEqual(
+		fromDateTimeLocalValue('2026-09-20T10:00'),
+		'2026-09-20T10:00:00.000Z',
+		'wall-clock value'
+	);
+	assertEqual(
+		fromDateTimeLocalValue('2026-09-20T10:00:30'),
+		'2026-09-20T10:00:30.000Z',
+		'wall-clock value with seconds'
+	);
+	assertEqual(
+		fromDateTimeLocalValue('2026-09-20 10:00'),
+		'2026-09-20T10:00:00.000Z',
+		'whitespace separator'
+	);
+
+	// The regression itself: an already-ISO value must round-trip, not explode.
+	assertEqual(
+		fromDateTimeLocalValue('2026-09-20T10:00:00.000Z'),
+		'2026-09-20T10:00:00.000Z',
+		'ISO timestamp with Z'
+	);
+	assertEqual(
+		fromDateTimeLocalValue('2026-09-20T10:00:00Z'),
+		'2026-09-20T10:00:00.000Z',
+		'ISO timestamp without milliseconds'
+	);
+	assertEqual(
+		fromDateTimeLocalValue('2026-09-20T12:00:00+02:00'),
+		'2026-09-20T10:00:00.000Z',
+		'offset timestamp normalised to UTC'
+	);
+
+	// A date without a time component is UTC midnight.
+	assertEqual(fromDateTimeLocalValue('2026-09-20'), '2026-09-20T00:00:00.000Z', 'date only');
+
+	// Anything unusable is reported as null instead of an Invalid Date.
+	for (const invalid of ['', '   ', 'tomorrow', '2026-13-45T99:99', '2026-09-20T10:00:00Z:00.000Z']) {
+		assertEqual(fromDateTimeLocalValue(invalid), null, `rejects "${invalid}"`);
+	}
+});
+
+test('fromDateTimeLocalValue round-trips toDateTimeLocalValue', () => {
+	for (const iso of ['2026-09-20T10:00:00.000Z', '2026-01-01T00:00:00.000Z', '2026-12-31T23:59:00.000Z']) {
+		assertEqual(
+			fromDateTimeLocalValue(toDateTimeLocalValue(iso)),
+			iso,
+			`round trip for ${iso}`
+		);
+	}
+});
+
+/**
+ * [LOW-01] `contentHtml` is never accepted from a caller: it is always re-derived
+ * from `contentMarkdown` by the sanitising renderer, so a patch cannot inject
+ * unsanitised markup or leave stale HTML beside new markdown.
+ */
+test('IssueStore never accepts caller-supplied contentHtml', () => {
+	const store = new IssueStore();
+	const draft = store.createDraft();
+
+	store.updateIssue(draft.id, {
+		contentHtml: '<img src=x onerror="alert(1)"><script>alert(2)</script>'
+	});
+
+	const updated = store.getById(draft.id);
+	if (!updated) throw new Error('updated issue missing');
+
+	assert(!updated.contentHtml.includes('onerror'), 'injected handler discarded');
+	assert(!updated.contentHtml.includes('<script'), 'injected script discarded');
+	assertEqual(
+		updated.contentHtml,
+		renderEditorialMarkdown(updated.contentMarkdown),
+		'HTML re-derived from markdown regardless of the patch shape'
+	);
+
+	// An unrelated patch still re-derives, so HTML can never drift from markdown.
+	store.updateIssue(draft.id, { title: 'Drift Guard' });
+	const drifted = store.getById(draft.id);
+	if (!drifted) throw new Error('updated issue missing');
+	assertEqual(
+		drifted.contentHtml,
+		renderEditorialMarkdown(drifted.contentMarkdown),
+		'HTML stays derived after an unrelated patch'
+	);
+});
+
+/**
+ * [HIGH-01 / MED-04] Duplicate detection is case-insensitive: an address that
+ * differs from a stored record only in case is the same mailbox and must collide,
+ * including for a legacy record that was persisted before normalisation.
+ */
+test('SubscriberStore detects duplicates case-insensitively', () => {
+	const store = new SubscriberStore();
+
+	assertEqual(store.existingEmails.length, store.totalCount, 'one address per record');
+	assert(
+		store.existingEmails.every((email) => email === email.toLowerCase()),
+		'existing emails are normalised for duplicate detection'
+	);
+
+	const created = store.addSubscriber({
+		email: 'Case.Test@Example.COM',
+		firstName: 'Case',
+		lastName: 'Test',
+		status: 'active',
+		tier: 'free',
+		tags: [],
+		notes: ''
+	});
+	assertEqual(created.email, 'case.test@example.com', 'writes are normalised on insert');
+	assertEqual(store.getByEmail('CASE.TEST@EXAMPLE.COM')?.id, created.id, 'lookup ignores case');
+
+	// A legacy record written with mixed case still collides with its normalised twin.
+	store.items = [
+		{ ...created, email: 'Legacy.Reader@Example.com' },
+		...store.items.filter((subscriber) => subscriber.id !== created.id)
+	];
+	assertEqual(store.getByEmail('legacy.reader@example.com')?.id, created.id, 'legacy record matches');
+	assertEqual(store.getByEmail('other.reader@example.com'), undefined, 'distinct address does not collide');
+
+	// An edit to a different record cannot borrow a case-variant of a stored address.
+	const other = store.items.find((subscriber) => subscriber.id !== created.id);
+	if (!other) throw new Error('seed record missing');
+	store.updateSubscriber(other.id, { email: 'LEGACY.READER@example.com' });
+	assertEqual(store.getById(other.id)?.email, 'legacy.reader@example.com', 'edit normalises on write');
+});
+
+/* ------------------------------------------------------------------ */
 /* runner                                                              */
 /* ------------------------------------------------------------------ */
 

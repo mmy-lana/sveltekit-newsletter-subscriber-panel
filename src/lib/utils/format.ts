@@ -89,12 +89,60 @@ export function toDateTimeLocalValue(iso: string | null): string {
 	return date.toISOString().slice(0, 16);
 }
 
-/** Inverse of {@link toDateTimeLocalValue}: interprets the value as UTC. */
+/**
+ * Grammar accepted by {@link fromDateTimeLocalValue}: an optional `T`/space
+ * separator, `HH:MM`, optional seconds and milliseconds, and an optional zone
+ * designator. Each component is captured so the value can be rebuilt explicitly
+ * instead of relying on the engine's implementation-defined fallback parsing.
+ */
+const DATE_TIME_PATTERN =
+	/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d{1,3}))?(Z|z|[+-]\d{2}:?\d{2})?)?$/;
+
+/**
+ * Inverse of {@link toDateTimeLocalValue}, hardened against values that are not
+ * bare `datetime-local` strings.
+ *
+ * [CRIT-01] The editor draft can legitimately hold either a wall-clock value read
+ * from `<input type="datetime-local">` (`2026-09-20T10:00`) or a value that is
+ * already a full ISO timestamp (`2026-09-20T10:00:00.000Z`). Appending `:00Z` to
+ * the latter produced an Invalid Date, and the caller's `toISOString()` then threw
+ * `RangeError: Invalid time value`, taking down the save handler.
+ *
+ * This parser therefore:
+ * - accepts a wall-clock value and reads it as UTC, matching {@link toDateTimeLocalValue};
+ * - accepts a value that already carries seconds or a zone designator and honours it;
+ * - accepts a date-only value as UTC midnight;
+ * - returns `null` for anything else instead of yielding an Invalid Date, so the
+ *   caller can surface the problem rather than crash.
+ */
 export function fromDateTimeLocalValue(value: string): string | null {
 	if (!value) return null;
-	const parsed = new Date(`${value}:00.000Z`);
-	if (Number.isNaN(parsed.getTime())) return null;
-	return parsed.toISOString();
+
+	const match = DATE_TIME_PATTERN.exec(value.trim());
+	if (!match) return null;
+
+	const [, year, month, day, hours, minutes, seconds, milliseconds, zone] = match;
+
+	// A date without a time component is read as UTC midnight.
+	const datePart = `${year}-${month}-${day}`;
+	if (hours === undefined) {
+		const midnight = new Date(`${datePart}T00:00:00.000Z`);
+		return Number.isNaN(midnight.getTime()) ? null : midnight.toISOString();
+	}
+
+	const timePart = `${hours}:${minutes}:${seconds ?? '00'}`;
+	const fraction = milliseconds ? `.${milliseconds.padEnd(3, '0')}` : '.000';
+
+	// An explicit zone (Z or a numeric offset) is preserved verbatim.
+	if (zone) {
+		const normalizedZone = zone === 'z' ? 'Z' : zone;
+		const withZone = new Date(`${datePart}T${timePart}${fraction}${normalizedZone}`);
+		return Number.isNaN(withZone.getTime()) ? null : withZone.toISOString();
+	}
+
+	// Otherwise the value is a wall-clock string, which this panel always stores as UTC.
+	const asUtc = new Date(`${datePart}T${timePart}.000Z`);
+	return Number.isNaN(asUtc.getTime()) ? null : asUtc.toISOString();
 }
 
 /** "3 days ago" / "in 2 hours", or an absolute date beyond a year. */
