@@ -179,6 +179,11 @@
 			placeholder="reader@example.com"
 			hint="Used as the unique identity for delivery and suppression."
 			error={isTouched ? errors.email : undefined}
+			oninput={() => {
+				// Re-validate as the operator types so the submit button recovers
+				// as soon as the address becomes valid again.
+				if (isTouched) validate();
+			}}
 			onblur={() => {
 				isTouched = true;
 				validate();
@@ -229,13 +234,7 @@
 
 	{#snippet footer()}
 		<Button variant="outline" size="sm" onclick={onclose} disabled={isSaving}>Cancel</Button>
-		<Button
-			variant="primary"
-			size="sm"
-			onclick={handleSubmit}
-			loading={isSaving}
-			disabled={isTouched && Boolean(errors.email)}
-		>
+		<Button variant="primary" size="sm" onclick={handleSubmit} loading={isSaving}>
 			{isEditing ? 'Save Changes' : 'Add Subscriber'}
 		</Button>
 	{/snippet}

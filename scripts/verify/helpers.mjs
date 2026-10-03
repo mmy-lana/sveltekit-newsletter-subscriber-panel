@@ -37,9 +37,37 @@ export async function clickByText(page, selector, text) {
 	return element;
 }
 
-/** Clicks a button/link by its accessible label text. */
+/**
+ * Clicks a control by its visible text or accessible label.
+ * When a dialog is open the search is scoped to it, so a page-level button with
+ * the same label cannot be clicked by accident.
+ */
 export async function clickButton(page, text) {
-	return clickByText(page, 'button, a[href], [role="button"]', text);
+	const scope = (await page.$('[role="dialog"]')) ?? null;
+	const root = scope ?? null;
+
+	return page.evaluate(
+		(sel, needle, dialogRoot) => {
+			const container = dialogRoot ?? document;
+			const candidates = Array.from(
+				container.querySelectorAll('button, a[href], [role="button"]')
+			);
+			const match = candidates.find((element) => {
+				const label = element.getAttribute('aria-label') ?? '';
+				return (
+					(element.textContent ?? '').includes(needle) || label.includes(needle)
+				);
+			});
+
+			if (!match) throw new Error(`No control matching "${needle}"${dialogRoot ? ' inside the dialog' : ''}`);
+			match.scrollIntoView({ block: 'center' });
+			match.click();
+			return true;
+		},
+		'button, a[href], [role="button"]',
+		text,
+		root
+	);
 }
 
 /** Replaces the value of a form control and fires the events Svelte listens to. */
@@ -100,21 +128,50 @@ export async function countOf(page, selector) {
 	return page.$$eval(selector, (nodes) => nodes.length);
 }
 
-/** True when any element matching the selector is visible to the user. */
+/**
+ * True when the element is rendered *and* inside the viewport.
+ * Off-canvas drawers are translated out of view rather than unmounted, so a
+ * bounding-rect check alone would wrongly report them as visible.
+ */
 export async function isVisible(page, selector) {
 	return page.evaluate((sel) => {
 		const element = document.querySelector(sel);
 		if (!element) return false;
+
 		const rect = element.getBoundingClientRect();
 		const style = window.getComputedStyle(element);
-		return (
-			rect.width > 0 &&
-			rect.height > 0 &&
-			style.visibility !== 'hidden' &&
-			style.display !== 'none' &&
-			Number(style.opacity) > 0
-		);
+		if (rect.width <= 0 || rect.height <= 0) return false;
+		if (style.visibility === 'hidden' || style.display === 'none') return false;
+		if (Number(style.opacity) === 0) return false;
+
+		const intersectsViewport =
+			rect.bottom > 0 &&
+			rect.right > 0 &&
+			rect.top < (window.innerHeight || 0) &&
+			rect.left < (window.innerWidth || 0);
+
+		return intersectsViewport;
 	}, selector);
+}
+
+/** Normalised text of the first match — collapses the whitespace Svelte emits between nodes. */
+export async function normalisedText(page, selector) {
+	return page.evaluate((sel) => {
+		const element = document.querySelector(sel);
+		return (element?.textContent ?? '').replace(/\s+/g, ' ').trim();
+	}, selector);
+}
+
+/**
+ * True when the visible page text contains the phrase.
+ * Matching is whitespace- and case-insensitive, because uppercasing utilities
+ * change the rendered casing of otherwise static copy.
+ */
+export async function pageContains(page, phrase) {
+	return page.evaluate(
+		(needle) => document.body.innerText.replace(/\s+/g, ' ').toLowerCase().includes(needle.toLowerCase()),
+		phrase
+	);
 }
 
 /** Asserts the document never scrolls horizontally at the current viewport. */

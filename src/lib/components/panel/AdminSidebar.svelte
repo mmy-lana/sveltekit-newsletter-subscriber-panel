@@ -23,6 +23,9 @@
 		{ name: 'Issues', href: '/admin/issues', description: 'Dispatches and archives' }
 	];
 
+	/** Single source of truth for the drawer position. */
+	const drawerTransform = $derived(isMobileOpen ? 'translate-x-0' : '-translate-x-full');
+
 	function isActive(href: string): boolean {
 		const pathname = page.url.pathname;
 		if (href === '/admin') return pathname === '/admin';
@@ -51,16 +54,21 @@
 	></button>
 {/if}
 
+<!--
+	Exactly one translate utility is applied at a time: emitting both
+	`-translate-x-full` and `translate-x-0` leaves the outcome to CSS source order.
+-->
 <aside
 	data-mobile-open={isMobileOpen}
 	aria-label="Publisher navigation"
-	class="fixed top-0 bottom-0 left-0 z-50 w-64 bg-stone-50 border-r border-stone-200 transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto flex flex-col justify-between shrink-0 {isMobileOpen
-		? 'translate-x-0'
-		: '-translate-x-full'}"
+	class="fixed top-0 bottom-0 left-0 z-50 w-64 overscroll-contain bg-stone-50 border-r border-stone-200 transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:z-auto flex flex-col justify-between shrink-0 {drawerTransform}"
 >
 	<div class="flex flex-col min-h-0 flex-1">
 		<div class="h-16 flex items-center justify-between px-6 border-b border-stone-200 shrink-0">
-			<a href="/admin" class="font-serif font-bold text-stone-900 text-lg tracking-tight">
+			<a
+				href="/admin"
+				class="inline-flex items-center min-h-[44px] font-serif font-bold text-stone-900 text-lg tracking-tight"
+			>
 				Publisher Studio
 			</a>
 			<button
@@ -83,7 +91,7 @@
 			</button>
 		</div>
 
-		<nav class="p-4 space-y-1 overflow-y-auto">
+		<nav class="p-4 space-y-1 overflow-y-auto overscroll-contain">
 			{#each navigation as item (item.href)}
 				{@const active = isActive(item.href)}
 				<a

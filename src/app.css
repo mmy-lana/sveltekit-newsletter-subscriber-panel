@@ -50,6 +50,17 @@
 		-webkit-tap-highlight-color: transparent;
 	}
 
+	/* Links are tap targets too: remove the double-tap zoom delay. */
+	a,
+	button,
+	[role='button'],
+	label,
+	select,
+	input,
+	textarea {
+		touch-action: manipulation;
+	}
+
 	body {
 		background-color: var(--color-paper);
 		color: var(--color-ink);

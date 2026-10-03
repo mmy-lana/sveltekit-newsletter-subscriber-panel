@@ -101,6 +101,7 @@
 		aria-invalid={error ? 'true' : undefined}
 		aria-describedby={describedBy}
 		aria-required={required ? 'true' : undefined}
+		spellcheck={type === 'email' || type === 'url' ? 'false' : undefined}
 		{oninput}
 		{onblur}
 		{onkeydown}

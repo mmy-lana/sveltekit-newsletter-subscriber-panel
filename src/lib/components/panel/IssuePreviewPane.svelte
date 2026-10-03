@@ -56,8 +56,11 @@
 			<img
 				src={issue.coverImageUrl}
 				alt=""
+				width="1200"
+				height="480"
 				class="w-full h-48 object-cover rounded border border-stone-200"
 				loading="lazy"
+				decoding="async"
 			/>
 		{/if}
 

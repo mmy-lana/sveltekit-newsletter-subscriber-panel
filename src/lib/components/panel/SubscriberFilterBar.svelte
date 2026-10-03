@@ -119,6 +119,8 @@
 				<input
 					id="subscriber-search"
 					type="search"
+					autocomplete="off"
+					spellcheck="false"
 					value={filters.searchQuery}
 					oninput={(event) => onfilterchange('searchQuery', event.currentTarget.value)}
 					placeholder="Search email, name or tag…"
@@ -128,6 +130,7 @@
 		</div>
 
 		<Select
+			id="filter-status"
 			class="lg:w-44"
 			label="Status"
 			hideLabel
@@ -136,6 +139,7 @@
 			onchange={handleStatus}
 		/>
 		<Select
+			id="filter-tier"
 			class="lg:w-36"
 			label="Tier"
 			hideLabel
@@ -144,6 +148,7 @@
 			onchange={handleTier}
 		/>
 		<Select
+			id="filter-tag"
 			class="lg:w-40"
 			label="Tag"
 			hideLabel
@@ -152,6 +157,7 @@
 			onchange={handleTag}
 		/>
 		<Select
+			id="filter-sort"
 			class="lg:w-44"
 			label="Sort by"
 			hideLabel

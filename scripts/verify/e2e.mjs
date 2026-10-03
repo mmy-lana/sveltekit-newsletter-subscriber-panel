@@ -129,7 +129,8 @@ async function main() {
 			try {
 				await scenario.run({ page, origin: ORIGIN, reporter, viewports: VIEWPORTS });
 			} catch (error) {
-				reporter.expect(false, `${scenario.name}: threw ${error.message}`);
+				const url = page.url();
+				reporter.expect(false, `${scenario.name}: threw ${error.message} (at ${url})`);
 			}
 
 			// A scenario that itself asserts "no console errors" already covers this;

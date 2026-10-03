@@ -35,8 +35,11 @@
 		<img
 			src={authorAvatarUrl}
 			alt=""
+			width="80"
+			height="80"
 			class="w-10 h-10 rounded-full object-cover border border-stone-200"
 			loading="lazy"
+			decoding="async"
 		/>
 	{:else}
 		<span

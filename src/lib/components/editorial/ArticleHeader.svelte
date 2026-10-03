@@ -25,7 +25,7 @@
 		</div>
 	{/if}
 
-	<h1 class="font-serif font-bold text-3xl sm:text-4xl lg:text-5xl text-stone-900 tracking-tight leading-tight">
+	<h1 class="font-serif font-bold text-3xl sm:text-4xl lg:text-5xl text-stone-900 tracking-tight leading-tight text-balance">
 		{issue.title}
 	</h1>
 
@@ -45,7 +45,10 @@
 		<img
 			src={issue.coverImageUrl}
 			alt=""
+			width="1200"
+			height="480"
 			class="w-full h-56 sm:h-72 lg:h-96 object-cover rounded border border-stone-200"
+			decoding="async"
 		/>
 	{/if}
 </header>

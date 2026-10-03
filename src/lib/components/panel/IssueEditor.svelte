@@ -145,6 +145,7 @@
 	{/if}
 
 	<Input
+		id="issue-title"
 		label="Title"
 		required
 		bind:value={form.title}
@@ -154,6 +155,7 @@
 	/>
 
 	<Input
+		id="issue-subtitle"
 		label="Subtitle"
 		bind:value={form.subtitle}
 		oninput={() => update({ subtitle: form.subtitle })}
@@ -161,6 +163,7 @@
 	/>
 
 	<Textarea
+		id="issue-excerpt"
 		label="Excerpt"
 		bind:value={form.excerpt}
 		rows={2}
@@ -186,6 +189,7 @@
 	</div>
 
 	<Input
+		id="issue-tags"
 		label="Tags"
 		bind:value={form.tagsInput}
 		onblur={handleTags}
@@ -195,6 +199,7 @@
 	/>
 
 	<Input
+		id="issue-cover"
 		label="Cover image URL"
 		type="url"
 		bind:value={form.coverImageUrl}
