@@ -1,70 +1,131 @@
 # Newsletter Distribution & Subscriber Panel
 
-An editorial-first publication and subscriber management system built with **SvelteKit 3**,
-**Svelte 5 runes**, **Tailwind CSS v4** and strict TypeScript. The public site reads like a
-minimalist newsletter; the panel behind it is a dense monochrome workspace for managing
-subscribers, authoring issues, and running asynchronous dispatch campaigns.
+An editorial-first publication and audience management workspace built with SvelteKit, Svelte 5 runes, Tailwind CSS v4, and strict TypeScript. The public interface offers a minimalist reading experience, backed by an administrative studio for subscriber directory management, newsletter authoring, and simulated batch distribution campaigns.
+
+- Live Application: https://sveltekit-newsletter-subscriber-pan-lake.vercel.app
+- Repository: https://github.com/mmy-lana/sveltekit-newsletter-subscriber-panel
+
+---
 
 ## Features
 
-- **Public archive & article reader** — serif editorial typesetting, sanitised markdown
-  rendering, subscribe flow with double opt-in semantics.
-- **Subscriber directory** — search, status/tier/tag filters, sortable columns, pagination,
-  row and bulk actions, CSV import with a per-row error report.
-- **Issue authoring** — markdown editor with a live preview, audience targeting, scheduling.
-- **Dispatch engine** — bounded batching, pause/resume, abortable cancellation, and delivery
-  statistics reconciled from the job log.
-- **Offline-first persistence** — a versioned LocalStorage adapter with shape validation,
-  canonical seeding, and convergence for payloads written by older builds.
-- **Mobile-first** — verified at 360, 390, 430, 768, 1024 and 1440 px with no horizontal
-  overflow and 44px touch targets below the `sm` breakpoint.
+### Editorial Public Reader
+- Serif-driven typography optimized for long-form reading.
+- XSS-hardened markdown renderer supporting headings, blockquotes, lists, code, and protocol-sanitized links.
+- Public dispatch archive with reading-time estimations, issue numbers, and bylines.
+- Integrated newsletter subscription card with email normalization and double opt-in status.
 
-## Getting started
+### Subscriber Directory & Management
+- Search, filter, and sort subscribers across status (`active`, `pending`, `unsubscribed`, `bounced`), membership tiers (`free`, `paid`, `founding`), and tags.
+- Dual-mode responsive layout: dense tabular view on desktop and touch-friendly card list on mobile.
+- RFC 4180-compliant CSV importer with column alias detection, UTF-8 BOM stripping, and row-level error reporting.
+- CSV export protected against spreadsheet formula injection (CWE-1236).
+- Protected bulk operations: status updates guard against accidental reactivation of hard bounces, and bulk deletions require explicit confirmation.
 
-```bash
-pnpm install          # dependencies
-pnpm run dev          # development server on http://localhost:5173
-pnpm run build        # production build (adapter-node)
-pnpm start            # serve the production build
+### Newsletter Authoring Studio
+- Split-screen authoring environment with a live rendered preview pane.
+- Metadata configuration including target audience segmentation, tags, cover image URL validation, and UTC schedule inputs.
+- Unsaved changes indicator with a browser `beforeunload` guard to prevent data loss.
+- Modal-guarded deletion workflows ensuring accidental clicks cannot delete content.
+
+### Distribution Queue Engine
+- Client-side asynchronous batch delivery simulation with configurable pacing.
+- Real-time progress bar reflecting delivered, opened, clicked, and bounced statuses.
+- Operator controls allowing in-flight runs to pause, resume, or halt safely at batch boundaries.
+- Reconciled engagement telemetry accurately separating Click-Through Rate (CTR: clicks / delivered) from Click-to-Open Rate (CTOR: clicks / opens).
+
+### Storage & Resilience
+- Offline-first persistence via a versioned, schema-validating LocalStorage adapter.
+- Deterministic canonical seed fixtures ensuring server-side rendering matches initial client hydration.
+- Explicit persistence error handling surfacing quota exhaustion or private browsing storage blocks via toast alerts.
+
+---
+
+## Architecture & Tech Stack
+
+- Framework: SvelteKit 3
+- Component Model: Svelte 5 Runes (`$state`, `$derived`, `$props`, `$bindable`, `$effect`)
+- Styling: Tailwind CSS v4 (`@theme` variables, zero-hover dependency for mobile)
+- Language: TypeScript (strict mode)
+- Deployment Target: `@sveltejs/adapter-vercel`
+- Testing & Verification: Puppeteer Core (headless Chromium runner)
+
+### Directory Overview
+
+```text
+src/
+  lib/
+    components/
+      editorial/     # Public reader components (Header, Byline, ArchiveCard, etc.)
+      panel/         # Admin features (SubscriberTable, IssueEditor, DeliveryQueue, etc.)
+      ui/            # Reusable primitives (Button, Modal, ConfirmDialog, Input, etc.)
+    state/           # Svelte 5 rune stores (subscriber, issue, queue, settings, toast)
+    storage/         # LocalStorage adapter, schema validators, and seed fixtures
+    types/           # Domain and UI TypeScript interfaces
+    utils/           # Pure helpers (CSV, markdown, formatters, metrics, scroll-lock)
+  routes/
+    admin/           # Dashboard overview, subscriber directory, and issue management
+    p/[slug]/        # Individual public article reader
+    +layout.svelte   # Root shell, design tokens, hydration hooks, and toast container
+    +page.svelte     # Public newsletter home and archive
+scripts/
+  verify/            # Multi-tier verification harness (Node SSR, logic, Chrome, E2E)
 ```
 
-## Verification
+---
 
-Every change is verified automatically; the suite never touches an interactive browser — it
-launches a disposable, headless Chromium with its own throwaway profile.
+## Getting Started
+
+### Prerequisites
+- Node.js 18.18+ or 20+
+- pnpm 9+ or 10+
+
+### Installation
 
 ```bash
-pnpm run verify         # everything below, in order
-pnpm run check          # svelte-check (0 errors, 0 warnings)
-pnpm run build          # production build
-pnpm run verify:logic   # deterministic domain + rune-store suite (Node)
-pnpm run verify:logic:chrome   # the same suite executed inside headless Chrome
-pnpm run verify:components    # SSR render assertions for all 39 primitives/components
-pnpm run verify:components:chrome  # token, touch-target and layout measurements in Chrome
-pnpm run verify:e2e      # full operator journeys against the built app
+git clone https://github.com/mmy-lana/sveltekit-newsletter-subscriber-panel.git
+cd sveltekit-newsletter-subscriber-panel
+pnpm install
 ```
 
-Artifacts (screenshots, generated gallery and suite bundles) land in `verify-artifacts/`,
-which is git-ignored.
+### Local Development
 
-## Architecture
+Start the development server:
 
-| Layer | Location | Responsibility |
-| :--- | :--- | :--- |
-| Types | `src/lib/types` | Serializable domain and presentation contracts |
-| Utils | `src/lib/utils` | Pure validators, CSV, markdown, metrics, formatting |
-| Storage | `src/lib/storage` | Versioned LocalStorage adapter and seed fixtures |
-| State | `src/lib/state` | Svelte 5 rune stores and the dispatch engine |
-| UI | `src/lib/components/ui` | Accessible primitives (button, modal, inputs, toasts) |
-| Panel | `src/lib/components/panel` | Admin domain components |
-| Editorial | `src/lib/components/editorial` | Public reader components |
-| Routes | `src/routes` | Screens: archive, article, dashboard, directory, issues, editor |
+```bash
+pnpm run dev
+```
 
-### Notes on the toolchain
+Open `http://localhost:5173` to view the public site or `http://localhost:5173/admin` to access the publisher studio.
 
-- `#lib` is the SvelteKit 3 package-import alias (declared in `package.json`); configuration
-  lives on the `sveltekit()` Vite plugin because `svelte.config.js` is no longer read.
-- Stores are seeded with the bundled fixtures so the server render and the first client render
-  match; `hydrate()` merges persisted data after mount, avoiding hydration mismatches.
-- `issueStore.updateIssue` always re-derives `contentHtml` from `contentMarkdown`, so stored
-  HTML can never drift from its source or carry markup injected by an older build.
+### Production Build
+
+Compile the application for production:
+
+```bash
+pnpm run build
+pnpm run preview
+```
+
+---
+
+## Verification & Quality Assurance
+
+The codebase includes an automated test matrix executed in Node and isolated headless Chromium instances:
+
+```bash
+pnpm run check                  # TypeScript and Svelte template type checking
+pnpm run build                  # Production build compilation
+pnpm run verify:logic           # Pure domain logic and rune store unit tests (Node)
+pnpm run verify:logic:chrome    # Pure domain logic verification executed in Chrome
+pnpm run verify:components      # SSR component markup and accessibility contract tests
+pnpm run verify:components:chrome # Design token and 44px touch-target measurement in Chrome
+pnpm run verify:e2e             # End-to-end multi-viewport operator scenarios in Chrome
+pnpm run verify                 # Executes all checks and test suites sequentially
+```
+
+---
+
+## License
+
+This project is licensed under the MIT License.
