@@ -66,6 +66,18 @@
 		};
 
 		if (draft.id) {
+			// An edit must not collide with a different record: the email is the
+			// identity used for delivery and suppression.
+			const collision = subscriberStore.items.find(
+				(subscriber) => subscriber.id !== draft.id && subscriber.email === draft.email
+			);
+
+			if (collision) {
+				isSaving = false;
+				toastStore.error('Duplicate address', 'This email is already in use by another subscriber.');
+				return;
+			}
+
 			subscriberStore.updateSubscriber(draft.id, payload);
 			toastStore.success('Subscriber updated', draft.email);
 		} else {
@@ -139,6 +151,14 @@
 		selectedIds = [];
 		toastStore.success('Subscribers deleted', `${count} record(s) removed from the audience.`);
 	}
+
+	// A rejected write (quota exhausted, private mode) is surfaced once, then cleared.
+	$effect(() => {
+		const message = subscriberStore.persistenceError;
+		if (!message) return;
+		toastStore.error('Not saved', message);
+		subscriberStore.dismissPersistenceError();
+	});
 
 	function handleDelete(): void {
 		if (!deleteTarget) return;

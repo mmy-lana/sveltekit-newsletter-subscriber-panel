@@ -221,6 +221,38 @@ export default [
 			reporter.expect(after <= before + 1, 'table reflects the added record');
 
 			// Clean up so later scenarios start from the seeded audience.
+			// [DATA-02] An edit must not collide with a different record.
+			await clickByText(page, 'table tbody tr button', 'Edit');
+			await waitForStep(page, () => Boolean(document.querySelector('[role="dialog"]')), 'edit dialog open');
+
+			await fillInput(page, '[role="dialog"] input[type="email"]', 'alex.chen@clouddev.io');
+			await clickButton(page, 'Save Changes');
+			await waitForStep(
+				page,
+				() => document.body.innerText.includes('already in the audience'),
+				'duplicate rejection at the field'
+			);
+			reporter.expect(
+				await isVisible(page, '[role="dialog"]'),
+				'the editor stays open so the operator can correct the address'
+			);
+			const flaggedInvalid = await page.evaluate(
+				() =>
+					document
+						.querySelector('[role="dialog"] input[type="email"]')
+						?.getAttribute('aria-invalid') === 'true'
+			);
+			reporter.expect(flaggedInvalid, 'the email field is flagged invalid for assistive technology');
+
+			const originalIntact = await page.evaluate(() => {
+				const stored = JSON.parse(localStorage.getItem('snsp_subscribers_v1') ?? '[]');
+				const record = stored.find((subscriber) => subscriber.email === 'e2e.reader@example.com');
+				return record ? record.id : null;
+			});
+			reporter.expect(originalIntact !== null, 'the original record is left untouched');
+
+			await clickButton(page, 'Cancel');
+
 			await page.evaluate(() => localStorage.removeItem('snsp_subscribers_v1'));
 		}
 	},

@@ -10,6 +10,8 @@ import { getSeedSettings, loadSettings, saveSettings } from '#lib/storage/local-
 export class SettingsStore {
 	settings = $state<PublicationSettings>(getSeedSettings());
 	isHydrated = $state(false);
+	/** Message describing the last failed persistence attempt, or null. */
+	persistenceError = $state<string | null>(null);
 
 	hydrate(): void {
 		if (typeof window === 'undefined' || this.isHydrated) return;
@@ -19,12 +21,28 @@ export class SettingsStore {
 
 	update(patch: Partial<PublicationSettings>): void {
 		this.settings = { ...this.settings, ...patch };
-		saveSettings(this.settings);
+		this.persist();
 	}
 
 	reset(): void {
 		this.settings = getSeedSettings();
-		saveSettings(this.settings);
+		this.persist();
+	}
+
+	/** Clears the surfaced persistence failure after the operator acknowledges it. */
+	dismissPersistenceError(): void {
+		this.persistenceError = null;
+	}
+
+	private persist(): void {
+		// Persistence only exists in the browser; during SSR there is nothing to
+		// write, so this is not a failure condition.
+		if (typeof window === 'undefined') return;
+
+		const persisted = saveSettings(this.settings);
+		this.persistenceError = persisted
+			? null
+			: 'Settings could not be saved to this browser’s local storage. Free up space or disable private browsing, then try again.';
 	}
 }
 

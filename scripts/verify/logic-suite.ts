@@ -9,7 +9,11 @@
 
 import type { CsvImportResult } from '#lib/types/newsletter';
 import { initialIssues, initialSettings, initialSubscribers } from '#lib/storage/seed-data';
-import { parseSubscribersCsv, toSubscribersCsv } from '#lib/utils/csv-parser';
+import {
+	neutralizeFormulaInjection,
+	parseSubscribersCsv,
+	toSubscribersCsv
+} from '#lib/utils/csv-parser';
 import { escapeHtml, renderEditorialMarkdown, sanitizeHref, toExcerpt } from '#lib/utils/markdown-renderer';
 import {
 	calculateAudienceClickRate,
@@ -264,6 +268,73 @@ test('parseSubscribersCsv honours header aliases and status/tier columns', () =>
 	assertEqual(imported[0].tier, 'paid', 'tier parsed');
 	assertEqual(imported[0].status, 'unsubscribed', 'status parsed');
 	assertEqual(imported[0].tags.join('|'), 'a|b', 'label alias split');
+});
+
+test('toSubscribersCsv neutralizes spreadsheet formula injection', () => {
+	// [SEC-01] CWE-1236: a cell starting with a formula trigger is executed by
+	// Excel/LibreOffice/Sheets as soon as the export is opened.
+	const payloads = [
+		'=1+1',
+		'+1+1',
+		'-1+1',
+		'@SUM(A1:A9)',
+		"\t=cmd|'/C calc'!A0",
+		"\r=cmd|'/C calc'!A0",
+		'|danger'
+	];
+
+	const exported = toSubscribersCsv(
+		payloads.map((payload, index) => ({
+			...initialSubscribers[0],
+			id: `formula-${index}`,
+			firstName: payload,
+			lastName: `Last${index}`,
+			tags: [payload]
+		}))
+	);
+
+	for (const payload of payloads) {
+		// The escaped cell still *contains* the payload as a substring, so the
+		// meaningful check is that every occurrence is immediately preceded by the
+		// neutralising apostrophe.
+		let occurrence = exported.indexOf(payload);
+
+		while (occurrence !== -1) {
+			assert(
+				exported[occurrence - 1] === "'",
+				`payload must never survive unescaped: ${JSON.stringify(payload)}`
+			);
+			occurrence = exported.indexOf(payload, occurrence + 1);
+		}
+	}
+
+	// Values that merely contain a trigger are untouched.
+	const safe = toSubscribersCsv([
+		{ ...initialSubscribers[0], id: 'safe-1', firstName: 'Ada', lastName: 'Lovelace', tags: ['math=fun'] }
+	]);
+	assert(safe.includes('Ada'), 'benign values are exported verbatim');
+	assert(safe.includes('math=fun'), 'an equals sign inside a value is not a trigger');
+	assert(!safe.includes("'math=fun"), 'only a leading trigger is escaped, never an inner one');
+});
+
+test('neutralizeFormulaInjection escapes only leading triggers', () => {
+	assertEqual(neutralizeFormulaInjection('=cmd'), "'=cmd", 'leading equals');
+	assertEqual(neutralizeFormulaInjection('@handle'), "'@handle", 'leading at sign');
+	assertEqual(neutralizeFormulaInjection('normal value'), 'normal value', 'untouched');
+	assertEqual(neutralizeFormulaInjection(''), '', 'empty string');
+	assertEqual(neutralizeFormulaInjection('a=b'), 'a=b', 'inner equals is safe');
+});
+
+test('parseSubscribersCsv strips a UTF-8 byte order mark', () => {
+	// [DATA-03] Spreadsheet exports start with U+FEFF, which would otherwise be
+	// glued to the first header cell and break column detection.
+	const csv = '\uFEFFemail,firstname,lastname\nada@example.com,Ada,Lovelace';
+	const { imported, summary } = parseSubscribersCsv(csv, new Set(), FIXED_NOW);
+
+	assertEqual(summary.errors.length, 0, `BOM broke header detection: ${JSON.stringify(summary.errors)}`);
+	assertEqual(summary.successfulImports, 1, 'row imported from BOM-prefixed content');
+	assertEqual(imported[0].email, 'ada@example.com', 'email parsed cleanly');
+	assertEqual(imported[0].firstName, 'Ada', 'first name parsed cleanly');
 });
 
 test('toSubscribersCsv round-trips through the parser', () => {
@@ -607,6 +678,45 @@ test('SubscriberStore mutates the audience with persistence-safe semantics', () 
 	store.deleteSubscriber(created.id);
 	assertEqual(store.totalCount, 14, 'record deleted');
 	assertEqual(store.getById(created.id), undefined, 'deleted record is gone');
+});
+
+test('SubscriberStore reconciles a whole delivery run in one pass', () => {
+	const store = new SubscriberStore();
+	const [first, second, third] = store.items;
+
+	const before = store.persistenceError;
+	store.recordDeliveriesBatch([
+		{ subscriberId: first.id, opened: true, clicked: true, openedAt: '2026-10-05T12:00:00Z' },
+		{ subscriberId: second.id, opened: true, clicked: false, openedAt: '2026-10-05T12:00:01Z' },
+		{ subscriberId: third.id, opened: false, clicked: false, openedAt: null }
+	]);
+
+	const updatedFirst = store.getById(first.id);
+	const updatedSecond = store.getById(second.id);
+	const updatedThird = store.getById(third.id);
+
+	if (!updatedFirst || !updatedSecond || !updatedThird) {
+		throw new Error('all batch targets must still exist');
+	}
+	assertEqual(updatedFirst.metrics.emailsReceivedCount, first.metrics.emailsReceivedCount + 1, 'receive counted');
+	assertEqual(updatedSecond.metrics.linksClickedCount, second.metrics.linksClickedCount, 'no click recorded');
+	assertEqual(updatedThird.metrics.emailsOpenedCount, third.metrics.emailsOpenedCount, 'non-open not counted');
+	assertEqual(
+		updatedFirst.metrics.lastOpenedAt,
+		'2026-10-05T12:00:00Z',
+		'explicit open timestamp retained'
+	);
+
+	// An empty batch is a no-op.
+	const snapshot = store.items.map((subscriber) => subscriber.metrics.emailsReceivedCount);
+	store.recordDeliveriesBatch([]);
+	assertEqual(
+		store.items.map((subscriber) => subscriber.metrics.emailsReceivedCount).join(','),
+		snapshot.join(','),
+		'empty batch changes nothing'
+	);
+
+	assertEqual(store.persistenceError, before ?? null, 'no persistence error raised');
 });
 
 test('SubscriberStore refuses to reactivate hard bounces in bulk', () => {

@@ -31,6 +31,8 @@ export class IssueStore {
 	/** Issue currently open in the editor, or null when browsing the list. */
 	currentEditorIssue = $state<NewsletterIssue | null>(null);
 	isHydrated = $state(false);
+	/** Message describing the last failed persistence attempt, or null. */
+	persistenceError = $state<string | null>(null);
 
 	hydrate(): void {
 		if (typeof window === 'undefined' || this.isHydrated) return;
@@ -239,8 +241,20 @@ export class IssueStore {
 		return this.getById(id);
 	}
 
+	/** Clears the surfaced persistence failure after the operator acknowledges it. */
+	dismissPersistenceError(): void {
+		this.persistenceError = null;
+	}
+
 	private persist(): void {
-		saveIssues(this.items);
+		// Persistence only exists in the browser; during SSR there is nothing to
+		// write, so this is not a failure condition.
+		if (typeof window === 'undefined') return;
+
+		const persisted = saveIssues(this.items);
+		this.persistenceError = persisted
+			? null
+			: 'Changes could not be saved to this browser’s local storage. Free up space or disable private browsing, then try again.';
 	}
 }
 

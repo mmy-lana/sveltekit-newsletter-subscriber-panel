@@ -11,8 +11,9 @@ import { initialIssues, initialSettings, initialSubscribers } from '#lib/storage
  *    corrupting the seed fixtures (which are shared module singletons).
  * 2. Every read validates the shape of persisted JSON and falls back to the seed
  *    fixtures when the payload is missing, corrupt, or structurally wrong.
- * 3. Writes never throw: storage quota failures and private-mode restrictions
- *    degrade to console diagnostics rather than breaking the UI.
+ * 3. Writes never throw: quota exhaustion and private-mode restrictions are
+ *    reported through the return value so callers can surface the failure
+ *    instead of silently losing the operator's work.
  */
 
 export const STORAGE_KEYS = {
@@ -67,9 +68,13 @@ export function loadSubscribers(): Subscriber[] {
 	return normalized;
 }
 
-export function saveSubscribers(subscribers: Subscriber[]): void {
-	if (!isBrowser()) return;
-	safeWrite(STORAGE_KEYS.SUBSCRIBERS, subscribers);
+/**
+ * @returns `true` when the document reached storage, `false` on the server or on
+ * a quota/permission failure. Callers must surface the failure to the operator.
+ */
+export function saveSubscribers(subscribers: Subscriber[]): boolean {
+	if (!isBrowser()) return false;
+	return safeWrite(STORAGE_KEYS.SUBSCRIBERS, subscribers);
 }
 
 export function loadIssues(): NewsletterIssue[] {
@@ -93,9 +98,10 @@ export function loadIssues(): NewsletterIssue[] {
 	return normalized;
 }
 
-export function saveIssues(issues: NewsletterIssue[]): void {
-	if (!isBrowser()) return;
-	safeWrite(STORAGE_KEYS.ISSUES, issues);
+/** @returns `true` when the document reached storage, `false` on failure. */
+export function saveIssues(issues: NewsletterIssue[]): boolean {
+	if (!isBrowser()) return false;
+	return safeWrite(STORAGE_KEYS.ISSUES, issues);
 }
 
 export function loadSettings(): PublicationSettings {
@@ -117,9 +123,10 @@ export function loadSettings(): PublicationSettings {
 	return normalized;
 }
 
-export function saveSettings(settings: PublicationSettings): void {
-	if (!isBrowser()) return;
-	safeWrite(STORAGE_KEYS.SETTINGS, settings);
+/** @returns `true` when the document reached storage, `false` on failure. */
+export function saveSettings(settings: PublicationSettings): boolean {
+	if (!isBrowser()) return false;
+	return safeWrite(STORAGE_KEYS.SETTINGS, settings);
 }
 
 /**
@@ -181,11 +188,14 @@ function safeRead(key: string): string | null {
 	}
 }
 
-function safeWrite(key: string, value: unknown): void {
+function safeWrite(key: string, value: unknown): boolean {
 	try {
 		localStorage.setItem(key, JSON.stringify(value));
+		return true;
 	} catch (error) {
+		// QuotaExceededError, SecurityError in private mode, or a serialisation fault.
 		console.error(`[snsp] Failed to persist "${key}" to localStorage`, error);
+		return false;
 	}
 }
 
@@ -194,18 +204,17 @@ function safeWrite(key: string, value: unknown): void {
  * which keeps reads side-effect-free in the common case while still converging
  * legacy payloads onto the canonical shape.
  */
-function persistIfChanged<T>(key: string, previousRaw: string, next: T): void {
+function persistIfChanged<T>(key: string, previousRaw: string, next: T): boolean {
 	let serialized: string;
 	try {
 		serialized = JSON.stringify(next);
 	} catch (error) {
 		console.error(`[snsp] Failed to serialise "${key}"`, error);
-		return;
+		return false;
 	}
 
-	if (serialized !== previousRaw) {
-		safeWrite(key, next);
-	}
+	if (serialized === previousRaw) return true;
+	return safeWrite(key, next);
 }
 
 function parseJson(raw: string): unknown {

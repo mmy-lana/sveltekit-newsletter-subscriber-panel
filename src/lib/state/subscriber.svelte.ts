@@ -34,6 +34,11 @@ export class SubscriberStore {
 	});
 	/** True once persisted data has been merged into the in-memory state. */
 	isHydrated = $state(false);
+	/**
+	 * Message describing the last failed persistence attempt (quota exhaustion,
+	 * private-mode restrictions). Null when every write succeeded.
+	 */
+	persistenceError = $state<string | null>(null);
 
 	/** Applies persisted data in the browser; a no-op on the server. */
 	hydrate(): void {
@@ -231,9 +236,32 @@ export class SubscriberStore {
 		id: string,
 		outcome: { opened?: boolean; clicked?: boolean; openedAt?: string | null }
 	): void {
+		this.recordDeliveriesBatch([{ subscriberId: id, ...outcome }]);
+	}
+
+	/**
+	 * Reconciles a whole delivery run in a single pass.
+	 *
+	 * The per-record path serialised and rewrote the entire audience once per
+	 * recipient, which is quadratic for a large dispatch. This builds one lookup
+	 * table, maps once, and performs exactly one storage write.
+	 */
+	recordDeliveriesBatch(
+		outcomes: Array<{
+			subscriberId: string;
+			opened?: boolean;
+			clicked?: boolean;
+			openedAt?: string | null;
+		}>
+	): void {
+		if (outcomes.length === 0) return;
+
 		const now = new Date().toISOString();
+		const outcomesById = new Map(outcomes.map((outcome) => [outcome.subscriberId, outcome]));
+
 		this.items = this.items.map((subscriber) => {
-			if (subscriber.id !== id) return subscriber;
+			const outcome = outcomesById.get(subscriber.id);
+			if (!outcome) return subscriber;
 
 			const metrics = recalculateEngagement({
 				...subscriber.metrics,
@@ -249,8 +277,20 @@ export class SubscriberStore {
 		this.persist();
 	}
 
+	/** Clears the surfaced persistence failure after the operator acknowledges it. */
+	dismissPersistenceError(): void {
+		this.persistenceError = null;
+	}
+
 	private persist(): void {
-		saveSubscribers(this.items);
+		// Persistence only exists in the browser; during SSR there is nothing to
+		// write, so this is not a failure condition.
+		if (typeof window === 'undefined') return;
+
+		const persisted = saveSubscribers(this.items);
+		this.persistenceError = persisted
+			? null
+			: 'Changes could not be saved to this browser’s local storage. Free up space or disable private browsing, then try again.';
 	}
 }
 

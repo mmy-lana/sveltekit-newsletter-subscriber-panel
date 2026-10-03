@@ -94,14 +94,18 @@
 		// Reconcile the run into the issue: status, publication timestamp, statistics.
 		issueStore.markAsSentFromJobs(dispatchIssue.id, queue.jobs, targetRecipients.length);
 
-		for (const job of queue.jobs) {
-			if (job.status !== 'delivered') continue;
-			subscriberStore.recordDelivery(job.subscriberId, {
-				opened: job.openedAt !== null,
-				clicked: job.clickedAt !== null,
-				openedAt: job.openedAt
-			});
-		}
+		// One pass over the audience and one storage write, instead of one write per
+		// recipient (which was quadratic for a large dispatch).
+		subscriberStore.recordDeliveriesBatch(
+			queue.jobs
+				.filter((job) => job.status === 'delivered')
+				.map((job) => ({
+					subscriberId: job.subscriberId,
+					opened: job.openedAt !== null,
+					clicked: job.clickedAt !== null,
+					openedAt: job.openedAt
+				}))
+		);
 
 		if (queue.statusCounts.bounced > 0) {
 			const bouncedIds = queue.jobs
@@ -131,6 +135,14 @@
 		if (dispatchStatus === 'running' || dispatchStatus === 'paused') return;
 		handleComplete();
 	}
+
+	// A rejected write (quota exhausted, private mode) is surfaced once, then cleared.
+	$effect(() => {
+		const message = subscriberStore.persistenceError;
+		if (!message) return;
+		toastStore.error('Not saved', message);
+		subscriberStore.dismissPersistenceError();
+	});
 
 	async function createNewDraft(): Promise<void> {
 		const draft = issueStore.createDraft();

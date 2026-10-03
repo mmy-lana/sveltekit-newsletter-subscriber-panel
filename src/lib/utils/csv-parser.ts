@@ -38,7 +38,11 @@ export function parseSubscribersCsv(
 	existingEmails: Set<string>,
 	nowIso: string = new Date().toISOString()
 ): { imported: Subscriber[]; summary: CsvImportResult } {
-	const records = parseRfc4180Csv(csvContent);
+	// Spreadsheet exports are frequently saved as UTF-8 with a BOM; left in place
+	// the marker becomes part of the first header cell and the email column is
+	// never matched.
+	const bomStrippedContent = csvContent.replace(/^\uFEFF/, '');
+	const records = parseRfc4180Csv(bomStrippedContent);
 	const summary: CsvImportResult = {
 		totalRows: 0,
 		successfulImports: 0,
@@ -138,6 +142,13 @@ export function parseSubscribersCsv(
 	return { imported, summary };
 }
 
+/**
+ * Leading characters a spreadsheet treats as the start of a formula.
+ * A cell beginning with one of these is evaluated when the exported file is
+ * opened, which is CSV formula injection (CWE-1236).
+ */
+const FORMULA_TRIGGERS = ['=', '+', '-', '@', '\t', '\r', '|'] as const;
+
 /** Builds a downloadable RFC 4180 export from the current subscriber list. */
 export function toSubscribersCsv(subscribers: Subscriber[]): string {
 	const header = ['email', 'firstname', 'lastname', 'status', 'tier', 'tags'];
@@ -152,11 +163,29 @@ export function toSubscribersCsv(subscribers: Subscriber[]): string {
 	return [header, ...rows].map((row) => row.map(escapeCsvField).join(',')).join('\r\n');
 }
 
+/**
+ * Neutralises spreadsheet formula injection before RFC 4180 escaping.
+ *
+ * A leading apostrophe is prepended to any cell that starts with a formula
+ * trigger; spreadsheets read it as a literal prefix, so the payload is never
+ * evaluated. Exported values stay faithful — only the dangerous prefix is
+ * escaped.
+ */
+export function neutralizeFormulaInjection(value: string): string {
+	if (!value) return value;
+
+	const firstChar = value[0];
+	const isTrigger = (FORMULA_TRIGGERS as readonly string[]).includes(firstChar);
+	return isTrigger ? `'${value}` : value;
+}
+
 function escapeCsvField(value: string): string {
-	if (/[",\r\n]/.test(value)) {
-		return `"${value.replace(/"/g, '""')}"`;
+	const safeValue = neutralizeFormulaInjection(value);
+
+	if (/[",\r\n]/.test(safeValue)) {
+		return `"${safeValue.replace(/"/g, '""')}"`;
 	}
-	return value;
+	return safeValue;
 }
 
 function normalizeHeader(header: string): string {
