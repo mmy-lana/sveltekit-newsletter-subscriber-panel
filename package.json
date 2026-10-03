@@ -3,21 +3,31 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#lib": "./src/lib",
+    "#lib/*": "./src/lib/*"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+    "start": "node build",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "verify:logic": "vite build --config scripts/verify/vite.logic.config.mjs --logLevel warn && node scripts/verify/run-logic.mjs",
+    "verify:chrome": "node scripts/verify/chrome-logic.mjs",
+    "verify:e2e": "node scripts/verify/e2e.mjs",
+    "verify": "pnpm run check && pnpm run build && pnpm run verify:logic && pnpm run verify:chrome && pnpm run verify:e2e"
   },
   "devDependencies": {
-    "@sveltejs/adapter-auto": "latest",
+    "@sveltejs/adapter-node": "^6.0.0",
     "@sveltejs/kit": "latest",
     "@sveltejs/vite-plugin-svelte": "latest",
     "@tailwindcss/vite": "latest",
+    "puppeteer-core": "^25.12.0",
     "svelte": "latest",
     "svelte-check": "latest",
     "tailwindcss": "latest",
-    "typescript": "latest",
+    "typescript": "^6.0.3",
     "vite": "latest"
   }
 }

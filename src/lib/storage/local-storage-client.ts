@@ -1,81 +1,359 @@
-import type { Subscriber, NewsletterIssue, PublicationSettings } from '$lib/types/newsletter';
-import { initialSubscribers, initialIssues, initialSettings } from './seed-data';
+import type { NewsletterIssue, PublicationSettings, Subscriber } from '#lib/types/newsletter';
+import { renderEditorialMarkdown } from '#lib/utils/markdown-renderer';
+import { createEmptyIssueStats, createEmptyMetrics } from '#lib/utils/metrics-calculator';
+import { initialIssues, initialSettings, initialSubscribers } from '#lib/storage/seed-data';
 
-const STORAGE_KEYS = {
-  SUBSCRIBERS: 'snsp_subscribers_v1',
-  ISSUES: 'snsp_issues_v1',
-  SETTINGS: 'snsp_settings_v1'
+/**
+ * Versioned, SSR-safe persistence adapter.
+ *
+ * Design rules:
+ * 1. Every read returns a defensive copy, so a caller can mutate freely without
+ *    corrupting the seed fixtures (which are shared module singletons).
+ * 2. Every read validates the shape of persisted JSON and falls back to the seed
+ *    fixtures when the payload is missing, corrupt, or structurally wrong.
+ * 3. Writes never throw: storage quota failures and private-mode restrictions
+ *    degrade to console diagnostics rather than breaking the UI.
+ */
+
+export const STORAGE_KEYS = {
+	SUBSCRIBERS: 'snsp_subscribers_v1',
+	ISSUES: 'snsp_issues_v1',
+	SETTINGS: 'snsp_settings_v1'
 } as const;
 
+const SUBSCRIBER_STATUSES = new Set(['active', 'unsubscribed', 'bounced', 'pending']);
+const SUBSCRIBER_TIERS = new Set(['free', 'paid', 'founding']);
+const ISSUE_STATUSES = new Set(['draft', 'scheduled', 'sending', 'sent', 'archived']);
+const AUDIENCE_FILTERS = new Set(['all', 'free_only', 'paid_only', 'founding_only']);
+
 function isBrowser(): boolean {
-  return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+	return typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+}
+
+/** True when LocalStorage is reachable — false in SSR and in locked-down browsers. */
+export function isStorageAvailable(): boolean {
+	if (!isBrowser()) return false;
+	try {
+		const probeKey = `${STORAGE_KEYS.SETTINGS}__probe`;
+		localStorage.setItem(probeKey, '1');
+		localStorage.removeItem(probeKey);
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 export function loadSubscribers(): Subscriber[] {
-  if (!isBrowser()) return initialSubscribers;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SUBSCRIBERS);
-    if (!raw) {
-      saveSubscribers(initialSubscribers);
-      return initialSubscribers;
-    }
-    return JSON.parse(raw) as Subscriber[];
-  } catch {
-    return initialSubscribers;
-  }
+	if (!isBrowser()) return clone(initialSubscribers);
+
+	const raw = safeRead(STORAGE_KEYS.SUBSCRIBERS);
+	if (raw === null) {
+		const seeded = seedSubscribers();
+		saveSubscribers(seeded);
+		return seeded;
+	}
+
+	const parsed = parseJson(raw);
+	const normalized = normalizeSubscribers(parsed);
+	if (!normalized) {
+		const seeded = seedSubscribers();
+		saveSubscribers(seeded);
+		return seeded;
+	}
+
+	// Write back when the persisted document is not already canonical, so a
+	// payload written by an older schema converges on the next read.
+	persistIfChanged(STORAGE_KEYS.SUBSCRIBERS, raw, normalized);
+	return normalized;
 }
 
 export function saveSubscribers(subscribers: Subscriber[]): void {
-  if (!isBrowser()) return;
-  try {
-    localStorage.setItem(STORAGE_KEYS.SUBSCRIBERS, JSON.stringify(subscribers));
-  } catch (error) {
-    console.error('Failed to persist subscribers to localStorage', error);
-  }
+	if (!isBrowser()) return;
+	safeWrite(STORAGE_KEYS.SUBSCRIBERS, subscribers);
 }
 
 export function loadIssues(): NewsletterIssue[] {
-  if (!isBrowser()) return initialIssues;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.ISSUES);
-    if (!raw) {
-      saveIssues(initialIssues);
-      return initialIssues;
-    }
-    return JSON.parse(raw) as NewsletterIssue[];
-  } catch {
-    return initialIssues;
-  }
+	if (!isBrowser()) return seedIssues();
+
+	const raw = safeRead(STORAGE_KEYS.ISSUES);
+	if (raw === null) {
+		const seeded = seedIssues();
+		saveIssues(seeded);
+		return seeded;
+	}
+
+	const normalized = normalizeIssues(parseJson(raw));
+	if (!normalized) {
+		const seeded = seedIssues();
+		saveIssues(seeded);
+		return seeded;
+	}
+
+	persistIfChanged(STORAGE_KEYS.ISSUES, raw, normalized);
+	return normalized;
 }
 
 export function saveIssues(issues: NewsletterIssue[]): void {
-  if (!isBrowser()) return;
-  try {
-    localStorage.setItem(STORAGE_KEYS.ISSUES, JSON.stringify(issues));
-  } catch (error) {
-    console.error('Failed to persist issues to localStorage', error);
-  }
+	if (!isBrowser()) return;
+	safeWrite(STORAGE_KEYS.ISSUES, issues);
 }
 
 export function loadSettings(): PublicationSettings {
-  if (!isBrowser()) return initialSettings;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    if (!raw) {
-      saveSettings(initialSettings);
-      return initialSettings;
-    }
-    return JSON.parse(raw) as PublicationSettings;
-  } catch {
-    return initialSettings;
-  }
+	if (!isBrowser()) return { ...initialSettings };
+
+	const raw = safeRead(STORAGE_KEYS.SETTINGS);
+	if (raw === null) {
+		saveSettings({ ...initialSettings });
+		return { ...initialSettings };
+	}
+
+	const normalized = normalizeSettings(parseJson(raw));
+	if (!normalized) {
+		saveSettings({ ...initialSettings });
+		return { ...initialSettings };
+	}
+
+	persistIfChanged(STORAGE_KEYS.SETTINGS, raw, normalized);
+	return normalized;
 }
 
 export function saveSettings(settings: PublicationSettings): void {
-  if (!isBrowser()) return;
-  try {
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
-  } catch (error) {
-    console.error('Failed to persist settings to localStorage', error);
-  }
+	if (!isBrowser()) return;
+	safeWrite(STORAGE_KEYS.SETTINGS, settings);
+}
+
+/** Restores every collection to the bundled seed fixtures. */
+export function resetStorage(): void {
+	if (!isBrowser()) return;
+
+	try {
+		localStorage.removeItem(STORAGE_KEYS.SUBSCRIBERS);
+		localStorage.removeItem(STORAGE_KEYS.ISSUES);
+		localStorage.removeItem(STORAGE_KEYS.SETTINGS);
+	} catch (error) {
+		console.error('[snsp] Failed to clear localStorage', error);
+	}
+
+	saveSubscribers(seedSubscribers());
+	saveIssues(seedIssues());
+	saveSettings({ ...initialSettings });
+}
+
+/** Serialises a download payload for the "export list" action. */
+export function exportToJson(payload: {
+	subscribers: Subscriber[];
+	issues: NewsletterIssue[];
+	settings: PublicationSettings;
+}): string {
+	return JSON.stringify(
+		{
+			exportedAt: new Date().toISOString(),
+			schemaVersion: 1,
+			...payload
+		},
+		null,
+		2
+	);
+}
+
+function safeRead(key: string): string | null {
+	try {
+		return localStorage.getItem(key);
+	} catch (error) {
+		console.error(`[snsp] Failed to read "${key}" from localStorage`, error);
+		return null;
+	}
+}
+
+function safeWrite(key: string, value: unknown): void {
+	try {
+		localStorage.setItem(key, JSON.stringify(value));
+	} catch (error) {
+		console.error(`[snsp] Failed to persist "${key}" to localStorage`, error);
+	}
+}
+
+/**
+ * Writes `next` back only when it serialises differently from what is stored,
+ * which keeps reads side-effect-free in the common case while still converging
+ * legacy payloads onto the canonical shape.
+ */
+function persistIfChanged<T>(key: string, previousRaw: string, next: T): void {
+	let serialized: string;
+	try {
+		serialized = JSON.stringify(next);
+	} catch (error) {
+		console.error(`[snsp] Failed to serialise "${key}"`, error);
+		return;
+	}
+
+	if (serialized !== previousRaw) {
+		safeWrite(key, next);
+	}
+}
+
+function parseJson(raw: string): unknown {
+	try {
+		return JSON.parse(raw);
+	} catch (error) {
+		console.error('[snsp] Persisted payload is not valid JSON; falling back to seed data', error);
+		return null;
+	}
+}
+
+function clone<T>(value: T): T {
+	return structuredClone(value);
+}
+
+/**
+ * Canonical seed payloads.
+ *
+ * The fixtures are normalised before they are handed out or persisted so the
+ * stored document is always identical to the in-memory document — most visibly,
+ * `contentHtml` is rendered from `contentMarkdown` even on a cold start.
+ */
+function seedSubscribers(): Subscriber[] {
+	return normalizeSubscribers(initialSubscribers) ?? clone(initialSubscribers);
+}
+
+function seedIssues(): NewsletterIssue[] {
+	return normalizeIssues(initialIssues) ?? clone(initialIssues);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asString(value: unknown, fallback = ''): string {
+	return typeof value === 'string' ? value : fallback;
+}
+
+function asNullableString(value: unknown): string | null {
+	return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function asCount(value: unknown): number {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function asNumber(value: unknown, fallback: number): number {
+	return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+/** Returns null when the payload is not an array, otherwise a fully-normalised copy. */
+function normalizeSubscribers(payload: unknown): Subscriber[] | null {
+	if (!Array.isArray(payload)) return null;
+
+	return payload.filter(isRecord).map((record) => {
+		const rawMetrics = isRecord(record.metrics) ? record.metrics : {};
+		const tags = Array.isArray(record.tags)
+			? record.tags.filter((tag): tag is string => typeof tag === 'string')
+			: [];
+
+		const status = SUBSCRIBER_STATUSES.has(record.status as string)
+			? (record.status as Subscriber['status'])
+			: 'pending';
+		const tier = SUBSCRIBER_TIERS.has(record.tier as string)
+			? (record.tier as Subscriber['tier'])
+			: 'free';
+
+		return {
+			id: asString(record.id),
+			email: asString(record.email).toLowerCase(),
+			firstName: asString(record.firstName),
+			lastName: asString(record.lastName),
+			status,
+			tier,
+			tags,
+			metrics: {
+				...createEmptyMetrics(),
+				emailsReceivedCount: asCount(rawMetrics.emailsReceivedCount),
+				emailsOpenedCount: asCount(rawMetrics.emailsOpenedCount),
+				linksClickedCount: asCount(rawMetrics.linksClickedCount),
+				lastOpenedAt: asNullableString(rawMetrics.lastOpenedAt),
+				openRatePercent: asNumber(rawMetrics.openRatePercent, 0),
+				clickRatePercent: asNumber(rawMetrics.clickRatePercent, 0)
+			},
+			subscribedAt: asString(record.subscribedAt, new Date(0).toISOString()),
+			updatedAt: asString(record.updatedAt, new Date(0).toISOString()),
+			notes: asString(record.notes)
+		};
+	});
+}
+
+/**
+ * Returns null when the payload is not an array, otherwise a fully-normalised copy.
+ * `contentHtml` is always re-derived from `contentMarkdown` so persisted HTML can
+ * never drift from the markdown that produced it (or carry stale injected markup).
+ */
+function normalizeIssues(payload: unknown): NewsletterIssue[] | null {
+	if (!Array.isArray(payload)) return null;
+
+	return payload.filter(isRecord).map((record) => {
+		const rawStats = isRecord(record.stats) ? record.stats : {};
+		const contentMarkdown = asString(record.contentMarkdown);
+		const status = ISSUE_STATUSES.has(record.status as string)
+			? (record.status as NewsletterIssue['status'])
+			: 'draft';
+		const audience = AUDIENCE_FILTERS.has(record.audience as string)
+			? (record.audience as NewsletterIssue['audience'])
+			: 'all';
+		const tags = Array.isArray(record.tags)
+			? record.tags.filter((tag): tag is string => typeof tag === 'string')
+			: [];
+
+		return {
+			id: asString(record.id),
+			slug: asString(record.slug),
+			title: asString(record.title, 'Untitled Dispatch'),
+			subtitle: asString(record.subtitle),
+			excerpt: asString(record.excerpt),
+			contentMarkdown,
+			contentHtml: renderEditorialMarkdown(contentMarkdown),
+			coverImageUrl: asNullableString(record.coverImageUrl),
+			authorName: asString(record.authorName, 'Publication Editor'),
+			authorAvatarUrl: asNullableString(record.authorAvatarUrl),
+			status,
+			audience,
+			tags,
+			scheduledAt: asNullableString(record.scheduledAt),
+			publishedAt: asNullableString(record.publishedAt),
+			createdAt: asString(record.createdAt, new Date(0).toISOString()),
+			updatedAt: asString(record.updatedAt, new Date(0).toISOString()),
+			stats: {
+				...createEmptyIssueStats(),
+				totalRecipients: asCount(rawStats.totalRecipients),
+				deliveredCount: asCount(rawStats.deliveredCount),
+				openedCount: asCount(rawStats.openedCount),
+				clickedCount: asCount(rawStats.clickedCount),
+				bouncedCount: asCount(rawStats.bouncedCount),
+				unsubscribedCount: asCount(rawStats.unsubscribedCount),
+				deliveryCompletedAt: asNullableString(rawStats.deliveryCompletedAt)
+			}
+		};
+	});
+}
+
+function normalizeSettings(payload: unknown): PublicationSettings | null {
+	if (!isRecord(payload)) return null;
+
+	return {
+		publicationName: asString(payload.publicationName, initialSettings.publicationName),
+		tagline: asString(payload.tagline, initialSettings.tagline),
+		description: asString(payload.description, initialSettings.description),
+		supportEmail: asString(payload.supportEmail, initialSettings.supportEmail),
+		accentColor: asString(payload.accentColor, initialSettings.accentColor),
+		fontFamily: payload.fontFamily === 'sans' ? 'sans' : 'serif',
+		defaultAudience: AUDIENCE_FILTERS.has(payload.defaultAudience as string)
+			? (payload.defaultAudience as PublicationSettings['defaultAudience'])
+			: initialSettings.defaultAudience,
+		enablePublicArchive:
+			typeof payload.enablePublicArchive === 'boolean'
+				? payload.enablePublicArchive
+				: initialSettings.enablePublicArchive,
+		enableComments:
+			typeof payload.enableComments === 'boolean'
+				? payload.enableComments
+				: initialSettings.enableComments
+	};
 }

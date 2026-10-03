@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { loadSettings, loadIssues } from '$lib/storage/local-storage-client';
+  import { loadSettings, loadIssues } from '#lib/storage/local-storage-client';
 
   const settings = loadSettings();
   const issues = loadIssues().filter((i) => i.status === 'sent');

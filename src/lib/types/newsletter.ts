@@ -1,3 +1,11 @@
+/**
+ * Pure data contracts for the newsletter publication and subscriber domain.
+ *
+ * Every interface in this module is transport-agnostic: it is serialisable to
+ * JSON, safe to persist in LocalStorage, and free of class instances or DOM
+ * references so that the same shape can travel across SSR and CSR boundaries.
+ */
+
 export type SubscriberStatus = 'active' | 'unsubscribed' | 'bounced' | 'pending';
 export type SubscriberTier = 'free' | 'paid' | 'founding';
 
@@ -94,22 +102,65 @@ export interface PublicationSettings {
   enableComments: boolean;
 }
 
+export type SubscriberSortField =
+  | 'subscribedAt'
+  | 'email'
+  | 'openRatePercent'
+  | 'lastOpenedAt'
+  | 'tier'
+  | 'status';
+
 export interface SubscriberFilterOptions {
   searchQuery: string;
   status: SubscriberStatus | 'all';
   tier: SubscriberTier | 'all';
   tag: string | 'all';
-  sortBy: 'subscribedAt' | 'email' | 'openRatePercent' | 'lastOpenedAt';
+  sortBy: SubscriberSortField;
   sortDirection: 'asc' | 'desc';
   page: number;
   pageSize: number;
 }
 
+export type IssueSortField = 'createdAt' | 'publishedAt' | 'totalRecipients' | 'title' | 'status';
+
 export interface IssueFilterOptions {
   status: IssueStatus | 'all';
   searchQuery: string;
-  sortBy: 'createdAt' | 'publishedAt' | 'totalRecipients';
+  sortBy: IssueSortField;
   sortDirection: 'asc' | 'desc';
   page: number;
   pageSize: number;
 }
+
+export interface DashboardMetricsSummary {
+  totalSubscribers: number;
+  activeSubscribers: number;
+  paidSubscribers: number;
+  monthlyRevenueEst: number;
+  averageOpenRatePercent: number;
+  averageClickRatePercent: number;
+  thirtyDayGrowthCount: number;
+  issuesSentCount: number;
+}
+
+export interface CsvImportError {
+  row: number;
+  email: string;
+  reason: string;
+}
+
+export interface CsvImportResult {
+  totalRows: number;
+  successfulImports: number;
+  failedImports: number;
+  errors: CsvImportError[];
+}
+
+/** Fields a caller must supply when creating a subscriber; identity + telemetry are derived. */
+export type SubscriberDraft = Omit<Subscriber, 'id' | 'subscribedAt' | 'updatedAt' | 'metrics'>;
+
+/** Fields a caller must supply when creating an issue; identity + stats are derived. */
+export type IssueDraft = Omit<
+  NewsletterIssue,
+  'id' | 'createdAt' | 'updatedAt' | 'contentHtml' | 'stats'
+>;

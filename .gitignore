@@ -2,8 +2,10 @@ node_modules
 .svelte-kit
 build
 dist
+.pnpm-store
 .env
 .env.*
 !.env.example
 .DS_Store
 repomix-output.xml
+verify-artifacts
